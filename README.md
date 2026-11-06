@@ -1,17 +1,55 @@
-Problem:
+# Landly
 
-Landly V1 brings together SDR & BDR (Sales Development Representative & Business Development Representative) job roles throughout the UK using APIs all into one place, but all the companies that get pulled in have to pass the filter of including SaaS/Technology/tech in the title or anywhere in the job description allowing users to filter for location(cities), when the job got posted(today, yesterday, last 7 days, last 2 weeks, last month), filter for keys words (included in the job description or title) so I can filter for any words I choose. I also want the jobs to be refreshed daily with the jobs that have just been added to be added to the top but at first it will pull in all job in the UK that have been posted in the last month. I have purposely left out other filters like, salary, company size(headcount), company stage (pre-seed, seed, series A, series B etc), industry(martech, fintech, proptech etc), also in the future I want a daily email with all the new jobs added with the last 24 hours.
+## Problem (Landly V1)
+Instead of me manually going out and finding jobs that match what I want using different job boards, Landly pulls all of the jobs I want in one place
 
-Then for each company I want the app to allow me with a click of a button or even better if it pulls is in through API Apollo so I can get the right decision makers, I just want it to attach the company on apollo so I can go in and find the decison makers myself but in the future I want it with an API to automatically pull in the hiring manager, other Sdrs in the team, talent acquisition person, and VP of sales.
+## v1 scope (building now)
+- Pull UK SDR/BDR roles from the last 30 days
+- Refresh daily, newest at the top
+- Filters: location (city), date posted (today, yesterday, 7 days, 14 days, 30 days), keyword (title or description)
+- Tech companies only
+- Exclude recruitment agencies
 
-Then for each job post I want to be able to click it and press add to list and from there I want to press a button and it gives me a brief on what they sell, who they sell to and what they do. In the future I want to add recent news(their website blogs, headline company news, recent fundraise) to be pulled in aswell.
+## Out of scope for v1 (later phases)
+- Apollo link / decision makers
+- Company brief (what they sell, who to, news)
+- Cold call, email and LinkedIn scripts using my CV
+- Sales plan
+- Daily email of new jobs
+- Filters for salary, company size, stage, industry
 
-From this info I want it to then generate me a cold call, email, and message script for that company, and when I do add my CV I want it to get context from my CV and add that to the scripts aswell.
+## Data source
+- Jobo ATS Jobs DB via RapidAPI (free plan)
+  - Limits: 5,000 jobs/month, 1,000 requests/month, 10 requests/hour
+  - Pulls from company career sites (Greenhouse, Lever, Ashby, Workday...), so fewer agency posts and full descriptions
+- Rejected: LinkedIn and Indeed (scraping against terms), Google jobs (no API), Adzuna/Reed (commercial-use limits; may revisit)
 
-In the future I want it to generate a sales plan aswell for each company but more on that later.
+## Data model (one job)
+- source job ID
+- title
+- company name
+- company website
+- locations (a list; a job can have several)
+- description
+- date posted
+- first seen date
+- source (which ATS)
+- link to job post
+- last_seen
 
-Data sources: Reed.co.uk API(Free developer access using HTTP basic authentication, Adzuna UK API (Free for developers via registration (App ID + Key)), Greenhouse & Lever Public ATS (100% free and open by calling ⁠[https://boards-api.greenhouse.io/v1/boards/](https://boards-api.greenhouse.io/v1/boards/){company_token}/jobs⁠ or ⁠[https://api.lever.co/v0/postings/](https://api.lever.co/v0/postings/){company_name}⁠)
+## Rules
+- SDR/BDR filter: `occupation.id == "jobo:sales-development-representative"` or `occupation.id == "jobo:business-development-representative"` 
+- Tech filter: saas, tech, technology, 
+- Agency filter: agency, no saas category, on behalf of our client, our client,
+- Location: a job post London AND Lisbon: included
+- What counts as "new": date posted
+- Duplicates: company names and IDs differ, e.g. Snowflake twice, Cision/Brandwatch. Clean the website URL and match on that plus title plus location?
 
-
-I will identify jobs posts that are the same by the company being the same (company name) and same exact job title
+## Flow
+<!-- The steps from "fetch jobs" to "show today's new roles". -->
+1. Fetch: get jobs from the API (both searches, all pages)
+2. Transform: convert each job from Jobo’s format into my data model. Keep only the fields I need, clean them up (e.g. website URLs), and store missing fields as empty.
+3. Filter: apply the SDR, tech and agency rules. Keep the jobs that pass. Save the rejected ones to a separate file with the reason.
+4. Save: add new jobs to the database. For jobs already saved, update last_seen. The database blocks duplicates by source job ID.
+5. Display: show them, newest first
 
