@@ -9,10 +9,16 @@ all_cleaned_jobs = []
 
 # For loop that transforms the data into our clean dictionary, then adds all the cleaned jobs to the cleaned jobs list above
 for job in job_data["jobs"]:
-    # Use the city for display. If there's no city (e.g. "Remote UK"), fall back to the country
-    place = job["locations"][0]["city"]
-    if place is None:
-        place = job["locations"][0]["country"]
+    locations = job["locations"]
+    # If the job has locations, use the first one's city (or country if no city)
+    if locations:
+        place = job["locations"][0]["city"]
+        if place is None:
+            place = job["locations"][0]["country"]
+    # If the job has no locations at all, avoid a crash
+    else:
+        place = "Unknown"
+
     clean_job = {
        "title" : job["title"],
        "company_name" : job["company"]["name"],
@@ -28,6 +34,7 @@ for job in job_data["jobs"]:
     all_cleaned_jobs.append(clean_job)
 
 print(len(all_cleaned_jobs))
+print(all_cleaned_jobs)
 
 
 
