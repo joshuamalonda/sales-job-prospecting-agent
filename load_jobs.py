@@ -9,9 +9,11 @@ print(job_data.keys())
 # start at job_data then open the jobs list, take the 1st item and gets its title
 print(job_data["jobs"][0]["title"])
 
-# For loop that prints all the jobs with the job title and company name
+# For loop that prints all the jobs with the job title, company name, and city
 for job in job_data["jobs"]:
-    print(job["title"], job["company"]["name"])
+    print(job["title"], job["company"]["name"], job["locations"][0]["city"])
+
+
 
 
 
