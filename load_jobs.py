@@ -42,7 +42,7 @@ for job in job_data["jobs"]:
 }
     all_cleaned_jobs.append(clean_job)
 
-
+# Keep only SDR/BDR roles. Catches non-SDR jobs the title search lets through
 kept_jobs = []
 
 rejected_jobs = []
@@ -54,12 +54,14 @@ for job in all_cleaned_jobs:
     else:
         rejected_jobs.append(job)
 
+# Industries that count as tech "Research & Development" left out, Jobo tags non-tech firms with it
 tech_jobs = []
 
 tech_industries = ["Software", "Custom Software & IT Services", "Security Products & Services", "Credit Cards & Transaction Processing"]
 for job in kept_jobs:
     company_category = job["company_categories"]
     company_industry = job["company_industries"]
+    # Flag: assume no match, flip to True if any industry is on the tech list
     has_tech_industries = False
     for industry in company_industry:
         if industry in tech_industries:
@@ -70,8 +72,27 @@ for job in kept_jobs:
     else:
         rejected_jobs.append(job)
 
+# Precise phrases only. "our client" wrongly matched real companies describing their customers
+agency_names = ["Lifelancer", "ManpowerGroup Talent Solutions", "Talent Solutions", "Excelerate360", "Huzzle"]
+agency_phrases = ["curated by", "on behalf of our client"]
 
-print(len(tech_jobs))
+final_jobs = []
+# DO: SentinelOne has no categories or industries, so it's wrongly rejected
+for job in tech_jobs:
+    company_name = job["company_name"]
+    description = job["description"]
+    # Lowercase so "Curated by" and "curated by" both match
+    description = description.lower()
+    has_agency_phrase = False
+    for agency_phrase in agency_phrases:
+        if agency_phrase in description:
+            has_agency_phrase = True
+            break
+    if company_name in agency_names or has_agency_phrase:
+        rejected_jobs.append(job)
+    else:
+        final_jobs.append(job)
+print(len(final_jobs))
 print(len(rejected_jobs))
 
 print(len(all_cleaned_jobs))
