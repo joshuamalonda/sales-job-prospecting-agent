@@ -11,7 +11,10 @@ print(job_data["jobs"][0]["title"])
 
 # For loop that prints all the jobs with the job title, company name, and city
 for job in job_data["jobs"]:
-    print(job["title"], job["company"]["name"], job["locations"][0]["city"])
+    place = job["locations"][0]["city"]
+    if place is None:
+        place = job["locations"][0]["country"]
+    print(job["title"], job["company"]["name"], place)
 
 
 
