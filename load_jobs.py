@@ -18,9 +18,16 @@ for job in job_data["jobs"]:
     if place is None:
         place = job["locations"][0]["country"]
     clean_job = {
-    "title": job["title"],
-    "company_name" : job["company"]["name"],
-    "place" : place
+       "title": job["title"],
+       "company_name" : job["company"]["name"],
+       "place" : place,
+       "company_website" : job["company"]["website"],
+       "description" : job["description"],
+       "source_job_id" : job["id"],
+       "locations" : job["locations"],
+       "date_posted" : job["date_posted"],
+       "source" : job["source"],
+       "link" : job["listing_url"]
 }
     all_cleaned_jobs.append(clean_job)
 
