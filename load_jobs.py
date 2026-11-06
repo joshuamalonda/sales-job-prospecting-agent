@@ -4,21 +4,17 @@ import json
 with open("jobs_page1.json") as job_file:
     job_data = json.load(job_file)
 
-print(job_data.keys())
-
-# start at job_data then open the jobs list, take the 1st item and gets its title
-print(job_data["jobs"][0]["title"])
-
+# A list that will store all of the job data we will transform into our own data model using a dictionary
 all_cleaned_jobs = []
 
-# For loop that prints all the jobs with the job title, company name, and place (if there isn't a city then replace it with country)
-# Then we transform the data into our clean dictionary, then add all the cleaned jobs to a list
+# For loop that transforms the data into our clean dictionary, then adds all the cleaned jobs to the cleaned jobs list above
 for job in job_data["jobs"]:
+    # Use the city for display. If there's no city (e.g. "Remote UK"), fall back to the country
     place = job["locations"][0]["city"]
     if place is None:
         place = job["locations"][0]["country"]
     clean_job = {
-       "title": job["title"],
+       "title" : job["title"],
        "company_name" : job["company"]["name"],
        "place" : place,
        "company_website" : job["company"]["website"],
@@ -32,7 +28,6 @@ for job in job_data["jobs"]:
     all_cleaned_jobs.append(clean_job)
 
 print(len(all_cleaned_jobs))
-print(all_cleaned_jobs[0])
 
 
 
