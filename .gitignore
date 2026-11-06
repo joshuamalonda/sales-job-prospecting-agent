@@ -1,0 +1,5 @@
+.env
+.venv/
+venv/
+jobs_page1.json
+__pycache__/
