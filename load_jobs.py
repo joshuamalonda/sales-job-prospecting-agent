@@ -133,3 +133,34 @@ def save_jobs(jobs, file_name):
         json.dump(jobs, job_file, indent=2)
 
 save_jobs(total_rejected_jobs, "rejected_jobs.json")
+
+def remove_duplicates(final_jobs):
+    kept = [] # jobs you keep
+    rejected_jobs = [] # duplicates
+    seen = set() # fingerprints you’ve already kept, like a guest list at a door
+    for job in final_jobs:
+        url = job["company_website"]
+        if url is None:
+            url = job["company_name"]
+        url = url.lower()
+        url = url.replace("https://", "")
+        url = url.replace("http://", "")
+        url = url.replace("www.", "")
+        url = url.split("/")[0]
+
+        key = (url, job["title"].lower(), job["place"])
+        if key in seen:
+           job["rejection_reason"] = "duplicate"
+           rejected_jobs.append(job)
+        else:
+           seen.add(key)
+           kept.append(final_jobs)
+    return rejected_jobs, kept
+
+
+duplicate_jobs, unique_jobs = remove_duplicates(final_jobs)
+print(len(unique_jobs))
+print(len(duplicate_jobs))
+
+total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs + duplicate_jobs
+print(len(total_rejected_jobs))
