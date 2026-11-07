@@ -81,7 +81,7 @@ Instead of manually searching different job boards for jobs that match what I wa
 - [x] Filter: page 1 test goes 100 → 99 (SDR) → 87 (tech) → 86 (agency) → 80 (duplicates)
 - [x] Save rejected jobs with reasons (20 rejected: 1 not SDR, 12 not tech, 1 agency, 6 duplicates)
 - [x] Refactor into functions
-- [ ] Save to database (SQLite)
+- [x] Save to database (SQLite)
 - [ ] Automate fetch (API call, both searches, all pages)
 - [ ] Display
 
