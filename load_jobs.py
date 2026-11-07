@@ -2,17 +2,22 @@ import json
 from datetime import date
 
 # job_file is the opened file. Its contents are JSON text, and json.load turns that into Python dicts and lists
-with open("jobs_page1.json") as job_file:
-    job_data = json.load(job_file)
+def load_jobs(file_name):
+    with open(file_name) as job_file:
+        job_data = json.load(job_file)
+    return job_data["jobs"]
 
-# A list that will store all of the job data we will transform into our own data model using a dictionary
-all_cleaned_jobs = []
+raw_jobs = load_jobs("jobs_page1.json")
+print(len(raw_jobs))
 
 # Works out today's date
 today = date.today().isoformat()
 
+# A list that will store all of the job data we will transform into our own data model using a dictionary
+all_cleaned_jobs = []
+
 # For loop that transforms the data into our clean dictionary, then adds all the cleaned jobs to the cleaned jobs list above
-for job in job_data["jobs"]:
+for job in raw_jobs:
     locations = job["locations"]
     # If the job has locations, use the first one's city (or country if no city)
     if locations:
@@ -92,6 +97,7 @@ for job in tech_jobs:
         rejected_jobs.append(job)
     else:
         final_jobs.append(job)
+
 print(len(final_jobs))
 print(len(rejected_jobs))
 
