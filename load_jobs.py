@@ -66,22 +66,27 @@ print(len(kept_sdrs))
 print(len(reject_sdrs))
 
 # Industries that count as tech "Research & Development" left out, Jobo tags non-tech firms with it
-tech_jobs = []
+def keep_tech_jobs(kept_sdrs):
+    tech_jobs = []
+    rejected_jobs = []
+    tech_industries = ["Software", "Custom Software & IT Services", "Security Products & Services", "Credit Cards & Transaction Processing"]
+    for job in kept_sdrs:
+       company_category = job["company_categories"]
+       company_industry = job["company_industries"]
+       has_tech_industries = False
+       for industry in company_industry:
+           if industry in tech_industries:
+               has_tech_industries = True
+               break
+       if "saas" in company_category or has_tech_industries:
+           tech_jobs.append(job)
+       else:
+           rejected_jobs.append(job)
+    return tech_jobs, rejected_jobs
 
-tech_industries = ["Software", "Custom Software & IT Services", "Security Products & Services", "Credit Cards & Transaction Processing"]
-for job in kept_sdrs:
-    company_category = clean_jobs(job["company_category"])
-    company_industry = clean_jobs(job["company_industries"])
-    # Flag: assume no match, flip to True if any industry is on the tech list
-    has_tech_industries = False
-    for industry in company_industry:
-        if industry in tech_industries:
-            has_tech_industries = True
-            break
-    if "saas" in company_category or has_tech_industries:
-        tech_jobs.append(job)
-    else:
-        rejected_jobs.append(job)
+tech_jobs, rejected_jobs = keep_tech_jobs(kept_sdrs)
+print(len(tech_jobs))
+print(len(rejected_jobs))
 
 # Precise phrases only. "our client" wrongly matched real companies describing their customers
 agency_names = ["Lifelancer", "ManpowerGroup Talent Solutions", "Talent Solutions", "Excelerate360", "Huzzle"]
