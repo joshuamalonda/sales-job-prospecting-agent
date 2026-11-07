@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import date
 
 # job_file is the opened file. Its contents are JSON text, and json.load turns that into Python dicts and lists
@@ -154,7 +155,7 @@ def remove_duplicates(final_jobs):
            rejected_jobs.append(job)
         else:
            seen.add(key)
-           kept.append(final_jobs)
+           kept.append(job)
     return rejected_jobs, kept
 
 
@@ -164,3 +165,63 @@ print(len(duplicate_jobs))
 
 total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs + duplicate_jobs
 print(len(total_rejected_jobs))
+
+
+def create_database():
+     # Opens the database file (creates it if it doesn't exist)
+
+    connection = sqlite3.connect("landly.db")
+
+    # Creates the jobs table, if it isn't there already
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            source_job_id   TEXT UNIQUE,
+            title           TEXT,
+            company_name    TEXT,
+            company_website TEXT,
+            place           TEXT,
+            description     TEXT,
+            date_posted     TEXT,
+            source          TEXT,
+            link            TEXT,
+            first_seen      TEXT,
+            last_seen       TEXT
+        )
+    """)
+
+# Saves the change to the file
+    connection.commit()
+    connection.close()
+
+create_database()
+
+# Saves a list of jobs into the jobs table, & now it uses upsert to insert new jobs and update last seen if the job is already in the database
+def save_to_database(unique_jobs):
+    connection = sqlite3.connect("landly.db")
+    for job in unique_jobs:
+        connection.execute("""
+            INSERT INTO jobs (
+                source_job_id, title, company_name, company_website, place,
+                description, date_posted, source, link, first_seen, last_seen
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_job_id) DO UPDATE SET
+                last_seen = excluded.last_seen
+        """, (
+            job["source_job_id"], job["title"], job["company_name"],
+            job["company_website"], job["place"], job["description"],
+            job["date_posted"], job["source"], job["link"],
+            job["first_seen"], job["last_seen"]
+        ))
+    connection.commit()
+    connection.close()
+
+# Counts how many jobs are in the database
+def count_jobs_in_database():
+    connection = sqlite3.connect("landly.db")
+    result = connection.execute("SELECT COUNT(*) FROM jobs").fetchone()
+    connection.close()
+    return result[0]
+
+save_to_database(unique_jobs)
+print(count_jobs_in_database())
