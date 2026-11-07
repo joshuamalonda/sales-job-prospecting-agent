@@ -88,26 +88,32 @@ tech_jobs, rejected_jobs = keep_tech_jobs(kept_sdrs)
 print(len(tech_jobs))
 print(len(rejected_jobs))
 
-# Precise phrases only. "our client" wrongly matched real companies describing their customers
-agency_names = ["Lifelancer", "ManpowerGroup Talent Solutions", "Talent Solutions", "Excelerate360", "Huzzle"]
-agency_phrases = ["curated by", "on behalf of our client"]
+def remove_agencies(tech_jobs):
+    agency_names = ["Lifelancer", "ManpowerGroup Talent Solutions", "Talent Solutions", "Excelerate360", "Huzzle"]
+    agency_phrases = ["curated by", "on behalf of our client"]
 
-final_jobs = []
+    final_jobs = []
+    rejected_jobs = []
 # DO: SentinelOne has no categories or industries, so it's wrongly rejected
-for job in tech_jobs:
-    company_name = job["company_name"]
-    description = job["description"]
+    for job in tech_jobs:
+        company_name = job["company_name"]
+        description = job["description"]
     # Lowercase so "Curated by" and "curated by" both match
-    description = description.lower()
-    has_agency_phrase = False
-    for agency_phrase in agency_phrases:
-        if agency_phrase in description:
-            has_agency_phrase = True
-            break
-    if company_name in agency_names or has_agency_phrase:
-        rejected_jobs.append(job)
-    else:
-        final_jobs.append(job)
+        description = description.lower()
+        has_agency_phrase = False
+        for agency_phrase in agency_phrases:
+            if agency_phrase in description:
+                has_agency_phrase = True
+                break
+        if company_name in agency_names or has_agency_phrase:
+            rejected_jobs.append(job)
+        else:
+            final_jobs.append(job)
+    return rejected_jobs, final_jobs
+
+rejected_jobs, final_jobs = remove_agencies(tech_jobs)
+print(len(final_jobs))
+print(len(rejected_jobs))
 
 
 
