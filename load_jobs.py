@@ -58,6 +58,7 @@ def keep_only_sdrs(cleaned):
          if occupation_id == "jobo:sales-development-representative":
              kept_jobs.append(job)
          else:
+            job["rejection_reason"] = "not sdr"
             rejected_jobs.append(job)
     return kept_jobs, rejected_jobs
 
@@ -81,6 +82,7 @@ def keep_tech_jobs(kept_sdrs):
        if "saas" in company_category or has_tech_industries:
            tech_jobs.append(job)
        else:
+           job["rejection_reason"] = "not tech"
            rejected_jobs.append(job)
     return tech_jobs, rejected_jobs
 
@@ -106,6 +108,7 @@ def remove_agencies(tech_jobs):
                 has_agency_phrase = True
                 break
         if company_name in agency_names or has_agency_phrase:
+            job["rejection_reason"] = "is an agency"
             rejected_jobs.append(job)
         else:
             final_jobs.append(job)
@@ -115,7 +118,12 @@ rejected_jobs, final_jobs = remove_agencies(tech_jobs)
 print(len(final_jobs))
 print(len(rejected_jobs))
 
+# Created a new variable that includes all of the rejected jobs from all the filters above
 total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs
 
 print(len(total_rejected_jobs))
+
+# Using a for loop to display the reason why each company was rejected
+for job in total_rejected_jobs:
+    print(job["company_name"], job["rejection_reason"])
 
