@@ -10,62 +10,68 @@ def load_jobs(file_name):
 raw_jobs = load_jobs("jobs_page1.json")
 print(len(raw_jobs))
 
-# Works out today's date
-today = date.today().isoformat()
-
-# A list that will store all of the job data we will transform into our own data model using a dictionary
-all_cleaned_jobs = []
-
 # For loop that transforms the data into our clean dictionary, then adds all the cleaned jobs to the cleaned jobs list above
-for job in raw_jobs:
-    locations = job["locations"]
-    # If the job has locations, use the first one's city (or country if no city)
-    if locations:
-        place = job["locations"][0]["city"]
-        if place is None:
-            place = job["locations"][0]["country"]
-    # If the job has no locations at all, avoid a crash
-    else:
-        place = "Unknown"
 
-    clean_job = {
-       "title" : job["title"],
-       "company_name" : job["company"]["name"],
-       "place" : place,
-       "company_website" : job["company"]["website"],
-       "description" : job["description"],
-       "source_job_id" : job["id"],
-       "locations" : job["locations"],
-       "date_posted" : job["date_posted"],
-       "source" : job["source"],
-       "link" : job["listing_url"],
-       "first_seen" : today,
-       "last_seen" : today,
-       "occupation_id" : job["occupation"]["id"],
-       "company_categories" : job["company"]["categories"],
-       "company_industries" : job["company"]["industries"]
-}
-    all_cleaned_jobs.append(clean_job)
+def clean_jobs(raw_jobs):
+    today = date.today().isoformat()
+    all_cleaned_jobs = []
+    for job in raw_jobs:
+        locations = job["locations"]
+        # If the job has locations, use the first one's city (or country if no city)
+        if locations:
+            place = job["locations"][0]["city"]
+            if place is None:
+                place = job["locations"][0]["country"]
+        # If the job has no locations at all, avoid a crash
+        else:
+            place = "Unknown"
+
+        clean_job = {
+            "title": job["title"],
+            "company_name": job["company"]["name"],
+            "place": place,
+            "company_website": job["company"]["website"],
+            "description": job["description"],
+            "source_job_id": job["id"],
+            "locations": job["locations"],
+            "date_posted": job["date_posted"],
+            "source": job["source"],
+            "link": job["listing_url"],
+            "first_seen": today,
+            "last_seen": today,
+            "occupation_id": job["occupation"]["id"],
+            "company_categories": job["company"]["categories"],
+            "company_industries": job["company"]["industries"]
+        }
+        all_cleaned_jobs.append(clean_job)
+    return all_cleaned_jobs
+
+cleaned = clean_jobs(raw_jobs)
+print(len(cleaned))
 
 # Keep only SDR/BDR roles. Catches non-SDR jobs the title search lets through
-kept_jobs = []
+def keep_only_sdrs(cleaned):
+    kept_jobs = []
+    rejected_jobs = []
+    for job in cleaned:
+         occupation_id = job["occupation_id"]
+         if occupation_id == "jobo:sales-development-representative":
+             kept_jobs.append(job)
+         else:
+            rejected_jobs.append(job)
+    return kept_jobs, rejected_jobs
 
-rejected_jobs = []
-
-for job in all_cleaned_jobs:
-    occupation_id = job["occupation_id"]
-    if occupation_id == "jobo:sales-development-representative":
-        kept_jobs.append(job)
-    else:
-        rejected_jobs.append(job)
+kept_sdrs, reject_sdrs = keep_only_sdrs(cleaned)
+print(len(kept_sdrs))
+print(len(reject_sdrs))
 
 # Industries that count as tech "Research & Development" left out, Jobo tags non-tech firms with it
 tech_jobs = []
 
 tech_industries = ["Software", "Custom Software & IT Services", "Security Products & Services", "Credit Cards & Transaction Processing"]
-for job in kept_jobs:
-    company_category = job["company_categories"]
-    company_industry = job["company_industries"]
+for job in kept_sdrs:
+    company_category = clean_jobs(job["company_category"])
+    company_industry = clean_jobs(job["company_industries"])
     # Flag: assume no match, flip to True if any industry is on the tech list
     has_tech_industries = False
     for industry in company_industry:
@@ -98,14 +104,6 @@ for job in tech_jobs:
     else:
         final_jobs.append(job)
 
-print(len(final_jobs))
-print(len(rejected_jobs))
 
-print(len(all_cleaned_jobs))
-print(all_cleaned_jobs[0])
-
-print(all_cleaned_jobs[0]["occupation_id"])
-print(all_cleaned_jobs[0]["company_categories"])
-print(all_cleaned_jobs[0]["company_industries"])
 
 
