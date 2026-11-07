@@ -84,9 +84,9 @@ def keep_tech_jobs(kept_sdrs):
            rejected_jobs.append(job)
     return tech_jobs, rejected_jobs
 
-tech_jobs, rejected_jobs = keep_tech_jobs(kept_sdrs)
+tech_jobs, not_tech = keep_tech_jobs(kept_sdrs)
 print(len(tech_jobs))
-print(len(rejected_jobs))
+print(len(not_tech))
 
 def remove_agencies(tech_jobs):
     agency_names = ["Lifelancer", "ManpowerGroup Talent Solutions", "Talent Solutions", "Excelerate360", "Huzzle"]
@@ -115,6 +115,7 @@ rejected_jobs, final_jobs = remove_agencies(tech_jobs)
 print(len(final_jobs))
 print(len(rejected_jobs))
 
+total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs
 
-
+print(len(total_rejected_jobs))
 
