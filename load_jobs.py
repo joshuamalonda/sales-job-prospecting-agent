@@ -127,3 +127,9 @@ print(len(total_rejected_jobs))
 for job in total_rejected_jobs:
     print(job["company_name"], job["rejection_reason"])
 
+# Saves a list of jobs to a JSON file
+def save_jobs(jobs, file_name):
+    with open(file_name, "w") as job_file:
+        json.dump(jobs, job_file, indent=2)
+
+save_jobs(total_rejected_jobs, "rejected_jobs.json")
