@@ -57,3 +57,13 @@ print(len(sdr_jobs))
 
 with open("jobs_sdr.json", "w") as job_file:
     json.dump(sdr_jobs, job_file, indent=2)
+
+bdr_jobs = fetch_all_pages("Business Development Representative")
+
+print(len(bdr_jobs))
+
+combined_jobs = bdr_jobs + sdr_jobs
+
+with open("jobs_all.json", "w") as job_file:
+    json.dump(combined_jobs, job_file, indent=2)
+

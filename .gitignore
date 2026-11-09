@@ -7,3 +7,5 @@ rejected_jobs.json
 landly.db
 .DS_Store
 .idea/
+jobs_sdr.json
+jobs_sdr_page1.json
