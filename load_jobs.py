@@ -6,12 +6,10 @@ from datetime import date
 def load_jobs(file_name):
     with open(file_name) as job_file:
         job_data = json.load(job_file)
-    return job_data["jobs"]
+    return job_data
 
-raw_jobs = load_jobs("jobs_page1.json")
+raw_jobs = load_jobs("jobs_all.json")
 print(len(raw_jobs))
-
-# For loop that transforms the data into our clean dictionary, then adds all the cleaned jobs to the cleaned jobs list above
 
 def clean_jobs(raw_jobs):
     today = date.today().isoformat()
@@ -56,7 +54,11 @@ def keep_only_sdrs(cleaned):
     rejected_jobs = []
     for job in cleaned:
          occupation_id = job["occupation_id"]
-         if occupation_id == "jobo:sales-development-representative":
+         job_title = job["title"].lower()
+         id_matches = occupation_id == "jobo:sales-development-representative"
+         title_matches = "sales development representative" in job_title or "business development representative" in job_title
+         is_manager = "manager" in job_title
+         if id_matches or (title_matches and not is_manager):
              kept_jobs.append(job)
          else:
             job["rejection_reason"] = "not sdr"
