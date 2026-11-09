@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Landly</title>
+</head>
+<body>
+    <h1>Landly</h1>
+    <p>{{ jobs|length }} UK tech SDR/BDR roles</p>
+
+    {% for job in jobs %}
+    <div class="job">
+        <h2>{{ job.title }}</h2>
+        <p>{{ job.company_name }}, {{ job.place }}</p>
+        <p>Posted {{ job.date_posted[:10] }}</p>
+        <a href="{{ job.link }}" target="_blank">View job</a>
+    </div>
+    {% endfor %}
+</body>
+</html>
