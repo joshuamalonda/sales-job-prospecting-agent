@@ -51,16 +51,12 @@ def fetch_all_pages(search_term):
 
     return all_jobs
 
-
-sdr_jobs = fetch_all_pages("Sales Development Representative")
-print(len(sdr_jobs))
-
-bdr_jobs = fetch_all_pages("Business Development Representative")
-print(len(bdr_jobs))
-
-combined_jobs = bdr_jobs + sdr_jobs
-print(len(combined_jobs))
-
-with open("jobs_all.json", "w") as job_file:
-    json.dump(combined_jobs, job_file, indent=2)
+# Fetches SDR and BDR jobs from the API and caches them in jobs_all.json
+def fetch_and_save():
+    sdr_jobs = fetch_all_pages("Sales Development Representative")
+    bdr_jobs = fetch_all_pages("Business Development Representative")
+    combined_jobs = sdr_jobs + bdr_jobs
+    print(len(sdr_jobs), len(bdr_jobs), len(combined_jobs))
+    with open("jobs_all.json", "w") as job_file:
+        json.dump(combined_jobs, job_file, indent=2)
 

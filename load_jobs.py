@@ -1,12 +1,19 @@
 import json
 import sqlite3
 from datetime import date
+from fetch_jobs import fetch_and_save
+
+# True = get fresh jobs from the API (uses ~3 requests). False = use the cached jobs_all.json
+FETCH_FROM_API = False
 
 # job_file is the opened file. Its contents are JSON text, and json.load turns that into Python dicts and lists
 def load_jobs(file_name):
     with open(file_name) as job_file:
         job_data = json.load(job_file)
     return job_data
+
+if FETCH_FROM_API:
+    fetch_and_save()
 
 raw_jobs = load_jobs("jobs_all.json")
 print(len(raw_jobs))
@@ -74,15 +81,18 @@ def keep_tech_jobs(kept_sdrs):
     tech_jobs = []
     rejected_jobs = []
     tech_industries = ["Software", "Custom Software & IT Services", "Security Products & Services", "Credit Cards & Transaction Processing"]
+    always_keep = ["Multiplier", "SentinelOne", "Carwow", "Searchable", "Deliveroo"]
     for job in kept_sdrs:
        company_category = job["company_categories"]
        company_industry = job["company_industries"]
+       company_name = job["company_name"]
+       keep_company = company_name in always_keep
        has_tech_industries = False
        for industry in company_industry:
-           if industry in tech_industries:
+           if industry in tech_industries or keep_company:
                has_tech_industries = True
                break
-       if "saas" in company_category or has_tech_industries:
+       if "saas" in company_category or has_tech_industries or keep_company:
            tech_jobs.append(job)
        else:
            job["rejection_reason"] = "not tech"
