@@ -18,13 +18,22 @@ Instead of manually searching different job boards for jobs that match what I wa
 - Daily email of new jobs
 - Filters for salary, company size, stage, industry
 
+## How to run
+1. Add your RapidAPI key to a `.env` file: `RAPIDAPI_KEY=your_key`
+2. In `load_jobs.py`, set `FETCH_FROM_API`:
+   - `True`: fetch fresh jobs from the API (about 3 requests) and cache them in `jobs_all.json`
+   - `False`: use the cached `jobs_all.json` (no requests, for testing)
+3. Run `python3 load_jobs.py`
+
 ## Data source
 - Jobo ATS Jobs DB via RapidAPI (free plan)
   - Limits: 5,000 jobs/month, 1,000 requests/month, 10 requests/hour
   - Pulls from company career sites (Greenhouse, Lever, Ashby, Workday...), so fewer agency posts and full descriptions
-- Two searches, because they return different jobs (0 overlap in testing):
+- Two searches, because they return different jobs:
   - `q="Sales Development Representative"`
   - `q="Business Development Representative"`
+- Fetches every page of results (`total_pages`), 100 jobs per page
+- Responses are cached to `jobs_all.json` to stay within the rate limit while developing
 - Rejected: LinkedIn and Indeed (scraping against terms), Google jobs (no API), Adzuna/Reed (commercial-use limits; may revisit)
 
 ## Data model (one job)
@@ -45,43 +54,57 @@ Instead of manually searching different job boards for jobs that match what I wa
 | link | `listing_url` | Job description page |
 | first_seen | set by Landly | Date Landly first saw the job |
 | last_seen | set by Landly | Date Landly last saw the job |
-| rejection_reason | set by Landly | Rejected jobs only: "not SDR", "not tech", "agency" or "duplicate" |
+| rejection_reason | set by Landly | Rejected jobs only: "not sdr", "not tech", "agency" or "duplicate" |
 
 ## Rules
-- **SDR/BDR filter:** keep if `occupation_id == "jobo:sales-development-representative"`. Jobo uses this ID for SDR and BDR titles. Catches non-SDR roles the title search lets through (e.g. SDR Manager). Known exception: Epicor's BDR role has a different ID.
-- **Tech filter:** keep if categories contain `saas` **or** industries include Software, Custom Software & IT Services, Security Products & Services, or Credit Cards & Transaction Processing. `saas` alone missed Snowflake, Rubrik and Teya. "Research & Development" is excluded on purpose, as Jobo tags non-tech companies with it (e.g. First Mile). Known gap: SentinelOne has no categories or industries.
+- **SDR/BDR filter:** keep if `occupation_id == "jobo:sales-development-representative"` **or** (the title contains "sales development representative" or "business development representative" **and** doesn't contain "manager"). The title fallback catches roles Jobo mislabels (e.g. Epicor, Carwow). The manager check keeps out roles like "SDR Manager".
+- **Tech filter:** keep if the company is on the `always_keep` list, **or** categories contain `saas`, **or** industries include Software, Custom Software & IT Services, Security Products & Services, or Credit Cards & Transaction Processing. "Research & Development" is excluded on purpose, as Jobo tags non-tech companies with it (e.g. First Mile).
+- **always_keep:** Multiplier, SentinelOne, Carwow, Deliveroo, Searchable. Tech companies whose Jobo data is missing or incomplete.
 - **Agency filter:** reject if the company name is on a blocklist (Lifelancer, ManpowerGroup Talent Solutions, Excelerate360, Huzzle) **or** the description contains a precise phrase ("curated by", "on behalf of our client"). "our client" and the HR & Staffing industry were rejected as rules because they also matched real tech companies.
-- **Duplicates (within one run):** a composite dedupe key of cleaned company domain + lowercased title + place. The first job with each key is kept, and later copies are rejected. Domain beats company name: it catches "First Mile" vs "First Mile | Certified B Corp". The same title in a different city counts as a separate job (e.g. Columbus Nottingham vs Manchester). Companies with no website fall back to the company name.
-- **Duplicates (across runs):** the database blocks a job it already has, by `source_job_id`
+- **Duplicates (within one run):** a composite dedupe key of cleaned company domain + lowercased title + place. The first job with each key is kept, and later copies are rejected. Domain beats company name: it catches "First Mile" vs "First Mile | Certified B Corp". The same title in a different city counts as a separate job. Companies with no website fall back to the company name.
+- **Duplicates (across runs):** the database blocks repeats by `source_job_id`. An upsert updates `last_seen` for jobs it already has, and leaves `first_seen` unchanged.
 - **Location:** a job with London AND Lisbon is included
 - **What counts as "new":** date posted. To review: reposted jobs (e.g. EngageTech created in May, reposted in November) and jobs Jobo indexes late. `first_seen` may be better for "new since my last run".
 
 ## Flow
-1. **Fetch:** get jobs from the API (both searches, all pages)
-2. **Transform:** convert each job from Jobo's format into my data model. Keep only the fields I need, clean them up, and store missing fields as empty.
-3. **Filter:** apply the rules in order: SDR → tech → agency → duplicates. Each step only checks the jobs that passed the one before. Rejected jobs are tagged with a `rejection_reason` and saved to `rejected_jobs.json`.
-4. **Save:** add new jobs to the database. For jobs already saved, update `last_seen`. The database blocks duplicates by `source_job_id`.
+1. **Fetch:** call the API for both searches, all pages, and cache to `jobs_all.json`
+2. **Transform:** convert each job from Jobo's format into my data model
+3. **Filter:** SDR → tech → agency → duplicates. Each step only checks the jobs that passed the one before. Rejected jobs are tagged with a `rejection_reason` and saved to `rejected_jobs.json`.
+4. **Save:** upsert into SQLite (`landly.db`). New jobs are inserted, and existing jobs get `last_seen` updated.
 5. **Display:** show them, newest first
 
 ## Functions
-| Function | Goes in | Comes out |
-|---|---|---|
-| `load_jobs` | file name | list of raw jobs |
-| `clean_jobs` | raw jobs | clean jobs |
-| `keep_only_sdrs` | clean jobs | SDR jobs, rejected |
-| `keep_tech_jobs` | SDR jobs | tech jobs, rejected |
-| `remove_agencies` | tech jobs | non-agency jobs, rejected |
-| `remove_duplicates` | non-agency jobs | unique jobs, rejected |
-| `save_jobs` | a list of jobs, file name | (writes a JSON file) |
+| Function | File | Goes in | Comes out |
+|---|---|---|---|
+| `fetch_all_pages` | fetch_jobs.py | search term | all jobs from every page |
+| `fetch_and_save` | fetch_jobs.py | (nothing) | runs both searches, saves `jobs_all.json` |
+| `load_jobs` | load_jobs.py | file name | list of raw jobs |
+| `clean_jobs` | load_jobs.py | raw jobs | clean jobs |
+| `keep_only_sdrs` | load_jobs.py | clean jobs | SDR jobs, rejected |
+| `keep_tech_jobs` | load_jobs.py | SDR jobs | tech jobs, rejected |
+| `remove_agencies` | load_jobs.py | tech jobs | non-agency jobs, rejected |
+| `remove_duplicates` | load_jobs.py | non-agency jobs | unique jobs, rejected |
+| `save_jobs` | load_jobs.py | jobs, file name | (writes a JSON file) |
+| `create_database` | load_jobs.py | (nothing) | creates the jobs table |
+| `save_to_database` | load_jobs.py | jobs | (upserts into SQLite) |
+| `count_jobs_in_database` | load_jobs.py | (nothing) | number of rows |
 
+## Results (live run, 9 Nov 2026)
+202 fetched → 201 (SDR) → 175 (tech) → 173 (agency) → 159 (unique). 43 rejected. 165 jobs in the database.
 
 ## Progress
-- [x] Fetch (manual, saved to JSON for now)
+- [x] Fetch from the API (both searches, all pages, cached)
 - [x] Transform
-- [x] Filter: page 1 test goes 100 → 99 (SDR) → 87 (tech) → 86 (agency) → 80 (duplicates)
-- [x] Save rejected jobs with reasons (20 rejected: 1 not SDR, 12 not tech, 1 agency, 6 duplicates)
+- [x] Filters: SDR (with title fallback), tech (with always_keep), agency
+- [x] Duplicates (within a run and across runs)
+- [x] Save rejected jobs with reasons
+- [x] Save to database (SQLite, with upsert)
 - [x] Refactor into functions
-- [x] Save to database (SQLite)
-- [ ] Automate fetch (API call, both searches, all pages)
-- [ ] Display
+- [x] One command runs the whole pipeline
+- [ ] Display (FastAPI + HTML/CSS)
+- [ ] Run daily on a schedule
 
+## Known gaps
+- Jobo's company data is sometimes missing or incomplete, so the tech filter needs a manual `always_keep` list
+- Jobo occasionally mislabels SDR roles with other occupation IDs (handled by the title fallback)
+- The API's `total` for the BDR search may be capped at 100. Not yet confirmed.
