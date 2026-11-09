@@ -4,3 +4,6 @@ venv/
 jobs_page1.json
 __pycache__/
 rejected_jobs.json
+landly.db
+.DS_Store
+.idea/

@@ -225,3 +225,4 @@ def count_jobs_in_database():
 
 save_to_database(unique_jobs)
 print(count_jobs_in_database())
+
