@@ -138,7 +138,7 @@ Landly/
 - [x] One command runs the whole pipeline
 - [x] Display: FastAPI web app with styled job cards
 - [x] Filters on the page: city and date posted
-- [ ] Run daily on a schedule
+- [x] Run daily on a schedule
 - [ ] Phase 2: research links, AI summaries, AI outreach, decision-maker enrichment
 
 ## Known gaps
@@ -147,3 +147,8 @@ Landly/
 - Jobo occasionally mislabels SDR roles with other occupation IDs (handled by the title fallback)
 - `posted_after` in `fetch_jobs.py` is a fixed date. It should be worked out as "30 days ago" each run.
 - The API's `total` for the BDR search may be capped at 100. Not yet confirmed.
+
+## Daily schedule
+   cron runs the pipeline at 8am daily, fetching the last 2 days of jobs:
+   0 8 * * * cd /Users/josh/code/Landly && FETCH_FROM_API=true /Users/josh/code/Landly/.venv/bin/python load_jobs.py >> /Users/josh/code/Landly/cron.log 2>&1
+   (Only runs if the Mac is awake at 8am.)
