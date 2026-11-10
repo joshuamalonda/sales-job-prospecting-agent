@@ -54,7 +54,7 @@ Instead of manually searching different job boards for jobs that match what I wa
 | link | `listing_url` | Job description page |
 | first_seen | set by Landly | Date Landly first saw the job |
 | last_seen | set by Landly | Date Landly last saw the job |
-| rejection_reason | set by Landly | Rejected jobs only: "not sdr", "not tech", "agency" or "duplicate" |
+| rejection_reason | set by Landly | Rejected jobs only: "not sdr", "not tech", "is an agency" or "duplicate" |
 
 ## Rules
 - **SDR/BDR filter:** keep if `occupation_id == "jobo:sales-development-representative"` **or** (the title contains "sales development representative" or "business development representative" **and** doesn't contain "manager"). The title fallback catches roles Jobo mislabels (e.g. Epicor, Carwow). The manager check keeps out roles like "SDR Manager".

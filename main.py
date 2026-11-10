@@ -1,6 +1,6 @@
-import sqlite3
-from fastapi import FastAPI, Request
-from fastapi.templating import Jinja2Templates
+import sqlite3 # Python's built-in module for SQLite databases
+from fastapi import FastAPI, Request # Importing FastAPI the web framework
+from fastapi.templating import Jinja2Templates # Importing the Jinja2 templates we are going to use with HTML
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -17,7 +17,7 @@ def get_jobs():
     connection.close()
     return [dict(row) for row in rows]
 
-
+# When someone visits /jobs: get the jobs from the database and fill them into jobs.html
 @app.get("/jobs")
 def show_jobs(request: Request):
     jobs = get_jobs()

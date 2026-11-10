@@ -3,7 +3,7 @@ import sqlite3
 from datetime import date
 from fetch_jobs import fetch_and_save
 
-# True = get fresh jobs from the API (uses ~3 requests). False = use the cached jobs_all.json
+# True = get fresh jobs from the API (uses 3 requests). False = use the cached jobs_all.json
 FETCH_FROM_API = False
 
 # job_file is the opened file. Its contents are JSON text, and json.load turns that into Python dicts and lists
@@ -11,13 +11,14 @@ def load_jobs(file_name):
     with open(file_name) as job_file:
         job_data = json.load(job_file)
     return job_data
-
+# When FETCH_FROM_API = True then call the API and save fresh jobs to jobs_all.json (calling a function from fetch_jobs.py)
 if FETCH_FROM_API:
     fetch_and_save()
-
+# Load all the jobs from the json file in Python code then print the total amount of jobs
 raw_jobs = load_jobs("jobs_all.json")
 print(len(raw_jobs))
 
+# Creating a function that gets all the job data and transforms it using the data model I created and then stores it in a list
 def clean_jobs(raw_jobs):
     today = date.today().isoformat()
     all_cleaned_jobs = []
@@ -89,7 +90,7 @@ def keep_tech_jobs(kept_sdrs):
        keep_company = company_name in always_keep
        has_tech_industries = False
        for industry in company_industry:
-           if industry in tech_industries or keep_company:
+           if industry in tech_industries:
                has_tech_industries = True
                break
        if "saas" in company_category or has_tech_industries or keep_company:
@@ -103,13 +104,13 @@ tech_jobs, not_tech = keep_tech_jobs(kept_sdrs)
 print(len(tech_jobs))
 print(len(not_tech))
 
+# Creating a function that removes agencies using filters for agency names & agency phrases so at the end we truly get only tech companies
 def remove_agencies(tech_jobs):
     agency_names = ["Lifelancer", "ManpowerGroup Talent Solutions", "Talent Solutions", "Excelerate360", "Huzzle"]
     agency_phrases = ["curated by", "on behalf of our client"]
 
     final_jobs = []
     rejected_jobs = []
-# DO: SentinelOne has no categories or industries, so it's wrongly rejected
     for job in tech_jobs:
         company_name = job["company_name"]
         description = job["description"]
@@ -145,12 +146,11 @@ def save_jobs(jobs, file_name):
     with open(file_name, "w") as job_file:
         json.dump(jobs, job_file, indent=2)
 
-save_jobs(total_rejected_jobs, "rejected_jobs.json")
 
 def remove_duplicates(final_jobs):
     kept = [] # jobs you keep
     rejected_jobs = [] # duplicates
-    seen = set() # fingerprints you’ve already kept, like a guest list at a door
+    seen = set() # dedupe keys of jobs already kept
     for job in final_jobs:
         url = job["company_website"]
         if url is None:
@@ -178,7 +178,9 @@ print(len(duplicate_jobs))
 total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs + duplicate_jobs
 print(len(total_rejected_jobs))
 
+save_jobs(total_rejected_jobs, "rejected_jobs.json")
 
+# Creating a database in SQLite
 def create_database():
      # Opens the database file (creates it if it doesn't exist)
 
@@ -235,6 +237,7 @@ def count_jobs_in_database():
     connection.close()
     return result[0]
 
+# Calling the function and printing the amount of jobs that are in the database
 save_to_database(unique_jobs)
 print(count_jobs_in_database())
 
