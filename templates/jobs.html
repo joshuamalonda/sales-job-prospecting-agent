@@ -1,43 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-      <link rel="stylesheet" href="/static/style.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Landly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>Landly</h1>
-    <p>{{ jobs|length }} UK tech SDR/BDR roles</p>
+    <main class="container">
+        <header class="page-header">
+            <h1 class="brand">Landly</h1>
+            <p class="subtitle">{{ jobs|length }} UK tech SDR/BDR roles</p>
+        </header>
 
-    <form method="get" action="/jobs">
-    <select name="city">
-        <option value="">All cities</option>
-        <option value="London" {% if city == "London" %}selected{% endif %}>London</option>
-        <option value="Manchester" {% if city == "Manchester" %}selected{% endif %}>Manchester</option>
-        <option value="Leeds" {% if city == "Leeds" %}selected{% endif %}>Leeds</option>
-        <option value="United Kingdom" {% if city == "United Kingdom" %}selected{% endif %}>Remote / UK-wide</option>
-    </select>
+        <form class="filters" method="get" action="/jobs">
+            <label class="field">
+                <span>City</span>
+                <select name="city">
+                    <option value="">All cities</option>
+                    <option value="London" {% if city == "London" %}selected{% endif %}>London</option>
+                    <option value="Manchester" {% if city == "Manchester" %}selected{% endif %}>Manchester</option>
+                    <option value="Leeds" {% if city == "Leeds" %}selected{% endif %}>Leeds</option>
+                    <option value="United Kingdom" {% if city == "United Kingdom" %}selected{% endif %}>Remote / UK-wide</option>
+                </select>
+            </label>
 
-    <select name="days">
-        <option value="">Any time</option>
-        <option value="0" {% if days == 0 %}selected{% endif %}>Today</option>
-        <option value="1" {% if days == 1 %}selected{% endif %}>Since yesterday</option>
-        <option value="7" {% if days == 7 %}selected{% endif %}>Past 7 days</option>
-        <option value="14" {% if days == 14 %}selected{% endif %}>Past 14 days</option>
-        <option value="30" {% if days == 30 %}selected{% endif %}>Past 30 days</option>
-    </select>
+            <label class="field">
+                <span>Posted</span>
+                <select name="days">
+                    <option value="">Any time</option>
+                    <option value="0" {% if days == 0 %}selected{% endif %}>Today</option>
+                    <option value="1" {% if days == 1 %}selected{% endif %}>Since yesterday</option>
+                    <option value="7" {% if days == 7 %}selected{% endif %}>Past 7 days</option>
+                    <option value="14" {% if days == 14 %}selected{% endif %}>Past 14 days</option>
+                    <option value="30" {% if days == 30 %}selected{% endif %}>Past 30 days</option>
+                </select>
+            </label>
 
-    <button type="submit">Filter</button>
-</form>
+            <button class="btn-primary" type="submit">Filter</button>
+        </form>
 
-    {% for job in jobs %}
-    <div class="job">
-        <h2>{{ job.company_name }}</h2>
-        <p>{{ job.title }}, {{ job.place }}</p>
-        <p>Posted {{ job.date_posted[:10] }}</p>
-        <a href="{{ job.company_website }}" target="_blank">View company website</a>
-        <a href="{{ job.link }}" target="_blank">View job</a>
-    </div>
-    {% endfor %}
+        <section class="job-list">
+            {% for job in jobs %}
+            <article class="job-card">
+                <div class="job-main">
+                    <h2 class="company">{{ job.company_name }}</h2>
+                    <p class="title">{{ job.title }}</p>
+                    <div class="meta">
+                        <span class="place">{{ job.place }}</span>
+                        <span class="date">Posted {{ job.date_posted[:10] }}</span>
+                    </div>
+                </div>
+                <div class="actions">
+                    <a class="btn-secondary" href="{{ job.company_website }}" target="_blank" rel="noopener">Company site</a>
+                    <a class="btn-primary" href="{{ job.link }}" target="_blank" rel="noopener">View job</a>
+                </div>
+            </article>
+            {% endfor %}
+        </section>
+    </main>
 </body>
 </html>
-
