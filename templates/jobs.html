@@ -1,19 +1,43 @@
 <!DOCTYPE html>
 <html>
 <head>
+      <link rel="stylesheet" href="/static/style.css">
     <title>Landly</title>
 </head>
 <body>
     <h1>Landly</h1>
     <p>{{ jobs|length }} UK tech SDR/BDR roles</p>
 
+    <form method="get" action="/jobs">
+    <select name="city">
+        <option value="">All cities</option>
+        <option value="London" {% if city == "London" %}selected{% endif %}>London</option>
+        <option value="Manchester" {% if city == "Manchester" %}selected{% endif %}>Manchester</option>
+        <option value="Leeds" {% if city == "Leeds" %}selected{% endif %}>Leeds</option>
+        <option value="United Kingdom" {% if city == "United Kingdom" %}selected{% endif %}>Remote / UK-wide</option>
+    </select>
+
+    <select name="days">
+        <option value="">Any time</option>
+        <option value="0" {% if days == 0 %}selected{% endif %}>Today</option>
+        <option value="1" {% if days == 1 %}selected{% endif %}>Since yesterday</option>
+        <option value="7" {% if days == 7 %}selected{% endif %}>Past 7 days</option>
+        <option value="14" {% if days == 14 %}selected{% endif %}>Past 14 days</option>
+        <option value="30" {% if days == 30 %}selected{% endif %}>Past 30 days</option>
+    </select>
+
+    <button type="submit">Filter</button>
+</form>
+
     {% for job in jobs %}
     <div class="job">
-        <h2>{{ job.title }}</h2>
-        <p>{{ job.company_name }}, {{ job.place }}</p>
+        <h2>{{ job.company_name }}</h2>
+        <p>{{ job.title }}, {{ job.place }}</p>
         <p>Posted {{ job.date_posted[:10] }}</p>
+        <a href="{{ job.company_website }}" target="_blank">View company website</a>
         <a href="{{ job.link }}" target="_blank">View job</a>
     </div>
     {% endfor %}
 </body>
 </html>
+

@@ -1,24 +1,43 @@
 import sqlite3 # Python's built-in module for SQLite databases
 from fastapi import FastAPI, Request # Importing FastAPI the web framework
 from fastapi.templating import Jinja2Templates # Importing the Jinja2 templates we are going to use with HTML
+from datetime import date, timedelta # So we can filter for dates
+from fastapi.staticfiles import StaticFiles # Importing the CSS file
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# Gets all jobs from the database, newest first
-def get_jobs():
+# Gets jobs from the database, newest first, optionally filtered by city and date posted
+def get_jobs(city=None, days=None):
+    sql = "SELECT title, company_name, company_website, place, date_posted, link FROM jobs"
+    conditions = []
+    values = []
+
+    if city:
+        conditions.append("place = ?")
+        values.append(city)
+
+    if days is not None:
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        conditions.append("date_posted >= ?")
+        values.append(cutoff)
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+
+    sql += " ORDER BY date_posted DESC"
+
     connection = sqlite3.connect("landly.db")
     connection.row_factory = sqlite3.Row
-    rows = connection.execute("""
-        SELECT title, company_name, place, date_posted, link
-        FROM jobs
-        ORDER BY date_posted DESC
-    """).fetchall()
+    rows = connection.execute(sql, values).fetchall()
     connection.close()
     return [dict(row) for row in rows]
 
-# When someone visits /jobs: get the jobs from the database and fill them into jobs.html
+# When someone visits /jobs (optionally with ?city=...&days=...): get matching jobs and fill jobs.html, if days has something in it, turn it into a number. Otherwise, use None
 @app.get("/jobs")
-def show_jobs(request: Request):
-    jobs = get_jobs()
-    return templates.TemplateResponse(request, "jobs.html", {"jobs": jobs})
+def show_jobs(request: Request, city: str = None, days: str = None):
+    days_number = int(days) if days else None
+    jobs = get_jobs(city, days_number)
+    return templates.TemplateResponse(request, "jobs.html", {"jobs": jobs, "city": city, "days": days_number})
+
