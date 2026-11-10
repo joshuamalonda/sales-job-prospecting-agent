@@ -2,9 +2,13 @@ import json
 import sqlite3
 from datetime import date
 from fetch_jobs import fetch_and_save
+import os
+
+# Fetch from the API if FETCH_FROM_API=true is set when running (the daily schedule sets it). Other-wise use the cached file.
+FETCH_FROM_API = os.getenv("FETCH_FROM_API") == "true"
 
 # True = get fresh jobs from the API (uses 3 requests). False = use the cached jobs_all.json
-FETCH_FROM_API = False
+FETCH_FROM_API = True
 
 # job_file is the opened file. Its contents are JSON text, and json.load turns that into Python dicts and lists
 def load_jobs(file_name):
