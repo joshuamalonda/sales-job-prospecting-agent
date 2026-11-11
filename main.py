@@ -4,6 +4,10 @@ from fastapi.templating import Jinja2Templates # Importing the Jinja2 templates 
 from datetime import date, timedelta # So we can filter for dates
 from fastapi.staticfiles import StaticFiles # Importing the CSS file
 
+from summaries import get_summary, create_summaries_table
+
+create_summaries_table()
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -40,4 +44,15 @@ def show_jobs(request: Request, city: str = None, days: str = None):
     days_number = int(days) if days else None
     jobs = get_jobs(city, days_number)
     return templates.TemplateResponse(request, "jobs.html", {"jobs": jobs, "city": city, "days": days_number})
+
+@app.get("/summary")
+def show_summary(company: str):
+    connection = sqlite3.connect("landly.db")
+    connection.row_factory = sqlite3.Row
+    sql = "SELECT company_name, company_website, description FROM jobs WHERE company_name = ? LIMIT 1"
+    row = connection.execute(sql, (company,)).fetchone()
+    connection.close()
+
+    summary = get_summary(row["company_name"], row["company_website"], row["description"])
+    return {"summary": summary}
 

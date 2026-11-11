@@ -8,6 +8,56 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Let the summary panel sit on its own full-width line under the card content */
+        .job-card { flex-wrap: wrap; row-gap: 0; }
+        .job-main { flex: 1 1 0; }
+
+        .summary-toggle[aria-expanded="true"] {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        /* Collapsed: zero-height grid row. Open: row grows to fit its content. */
+        .summary-panel {
+            flex: 0 0 100%;
+            display: grid;
+            grid-template-rows: 0fr;
+            margin-top: 0;
+            opacity: 0;
+            transition: grid-template-rows 0.25s ease, margin-top 0.25s ease, opacity 0.2s ease;
+        }
+
+        .summary-panel.is-open {
+            grid-template-rows: 1fr;
+            margin-top: 16px;
+            opacity: 1;
+        }
+
+        .summary-clip {
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .summary-body {
+            padding: 14px 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            white-space: pre-line;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+
+        @media (max-width: 640px) {
+            .actions { margin-top: 16px; }
+            .summary-panel { flex-basis: auto; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .summary-panel { transition: none; }
+        }
+    </style>
 </head>
 <body>
     <main class="container">
@@ -59,10 +109,47 @@
                     <a class="btn-secondary" href="https://www.glassdoor.co.uk/Search/results.htm?keyword={{ job.company_name|urlencode }}" target="_blank" rel="noopener">Glassdoor</a>
                     <a class="btn-secondary" href="https://www.google.com/search?q=site:repvue.com+{{ job.company_name|urlencode }}" target="_blank" rel="noopener">RepVue</a>
                     <a class="btn-primary" href="{{ job.link }}" target="_blank" rel="noopener">View job</a>
+                    <button class="btn-secondary summary-toggle" type="button" aria-expanded="false" aria-controls="summary-{{ loop.index }}" data-company="{{ job.company_name }}">Summary</button>
+                </div>
+                <div class="summary-panel" id="summary-{{ loop.index }}">
+                    <div class="summary-clip">
+                        <div class="summary-body"></div>
+                    </div>
                 </div>
             </article>
             {% endfor %}
         </section>
     </main>
+
+    <script>
+        document.querySelectorAll(".summary-toggle").forEach((button) => {
+            const panel = document.getElementById(button.getAttribute("aria-controls"));
+            const body = panel.querySelector(".summary-body");
+            let status = "not-loaded";
+
+            button.addEventListener("click", async () => {
+                const isOpen = button.getAttribute("aria-expanded") === "true";
+                button.setAttribute("aria-expanded", String(!isOpen));
+                panel.classList.toggle("is-open", !isOpen);
+
+                if (isOpen || status !== "not-loaded") return;
+
+                status = "loading";
+                body.textContent = "Loading summary...";
+
+                try {
+                    const response = await fetch("/summary?company=" + encodeURIComponent(button.dataset.company));
+                    if (!response.ok) throw new Error("Request failed: " + response.status);
+                    const data = await response.json();
+                    if (typeof data.summary !== "string") throw new Error("No summary in response");
+                    body.textContent = data.summary;
+                    status = "loaded";
+                } catch (error) {
+                    body.textContent = "Couldn't load summary";
+                    status = "not-loaded";
+                }
+            });
+        });
+    </script>
 </body>
 </html>
