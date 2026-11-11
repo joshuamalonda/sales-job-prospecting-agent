@@ -250,6 +250,10 @@ h1, h2, p {
         padding: 18px;
     }
 
+    .actions {
+        flex-wrap: wrap;
+    }
+
     .actions .btn-primary,
     .actions .btn-secondary {
         flex: 1;
