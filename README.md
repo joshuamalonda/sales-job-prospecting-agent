@@ -1,154 +1,109 @@
 # Landly
 
-Landly pulls UK tech SDR/BDR job openings from a jobs API, filters out non-SDR roles, non-tech companies and recruitment agencies, removes duplicates, stores the results in a database, and shows them on a filterable web page.
+A job search tool for people breaking into UK tech sales (SDR/BDR roles).
 
-## Problem (Landly v1)
-Instead of manually searching different job boards for jobs that match what I want, Landly pulls them all into one place.
+Most candidates send a CV. Landly helps you show up having **already done the job**: for any role, it builds a sourced prospecting plan for that company. It covers who they sell to, the triggers to watch for, 1–3 real accounts with evidence, the person to contact, a cold email and a cold call script, ready to send to the hiring manager as a PDF.
 
-## v1 scope
-- Pull UK SDR/BDR roles from the last 30 days
-- Newest at the top
-- Filters: city, date posted (today, since yesterday, 7 days, 14 days, 30 days)
-- Tech companies only
-- Exclude recruitment agencies
+---
 
-## Out of scope for v1 (Phase 2+)
-- Decision-maker enrichment (on-demand button)
-- AI company summaries
-- AI outreach: LinkedIn note, cold email and cold call script using my frameworks and CV
-- RepVue and Glassdoor research links
-- Keyword filter
-- Daily email of new jobs
-- Filters for salary, company size, stage, industry
+## What it does
+
+| Feature | How |
+|---|---|
+| **Job feed** | Pulls UK SDR/BDR jobs from a jobs API, filters out irrelevant roles, and stores them in SQLite |
+| **Filters** | By city, by date posted, and by applied / not applied |
+| **Company summary** | A plain-English brief of what the company does, who they sell to and the problem they solve (OpenAI), cached per company |
+| **Decision makers** | Senior sales leaders at the company (Blitz API), with a UK → Europe → US fallback |
+| **Prospecting plan** | ICP, triggers, 1–3 evidence-backed target accounts, a buyer, a cold email and a cold call script, exported as a PDF |
+| **Applied tracking** | Mark companies as applied; badge and filter on the job list |
+| **Editable plans** | Edit the plan in the browser and save it before exporting |
+
+---
+
+## How the prospecting plan works
+
+```
+Job + company website
+   │
+   ▼
+1. Get text      website → (blocked?) Exa's copy of the site → job ad
+2. Build ICP     OpenAI works out the SDR's motion (who they contact, what they ask),
+                 then the problem, triggers, buyer titles and search queries
+3. Find accounts Exa company search → exclude the employer + companies named in the job ad
+4. Find proof    Exa news from the last 90 days for each candidate
+5. Rank          OpenAI picks up to 3 → code verifies every claim → AI judge checks the opening line
+6. Find a buyer  Blitz: exact titles → broader titles → founders (optional)
+7. Write         OpenAI writes the email + call script for the strongest account → code enforces the rules
+8. Cache         Saved as JSON in SQLite: built once, loads instantly after
+```
+
+---
+
+## Key design decisions
+
+**Ask the AI, then verify in code.** The model has to quote 5–20 words *exactly* from its source, and the code checks that the quote really appears in that account's own evidence. This came from a real bug: the model claimed a company had raised funding when the source said nothing of the sort.
+
+**Quality over quantity.** Accounts must score 4/5 or higher, pass the evidence checks and avoid banned phrases. One strong account beats five weak ones, and "no accounts this week" is an acceptable answer.
+
+**Build the ICP from the SDR's motion, not "what they sell".** An acquirer's SDRs contact founders about selling their business; a SaaS vendor's SDRs book demos. Getting this first makes every later step correct, and it works across industries with no special cases.
+
+**Fixed text by code, variable text by AI.** The cold call opener, greeting and sign-off are inserted by code, so they're word for word every time. The AI only writes what changes per company.
+
+**Generate → check → retry once → give up gracefully.** Outreach that breaks the rules (subject over 4 words, more than 2 sentences per paragraph, banned phrases) is regenerated with the list of failures. If it fails again, it's left out rather than shown broken.
+
+**Essential vs bonus steps.** Exa and OpenAI failures stop the plan. Blitz and outreach failures are logged and skipped, because a missing contact never blocks the plan.
+
+**Cache everything that costs money.** Summaries, contacts and plans are each paid for once per company. Failed calls are never cached, so they retry next time.
+
+**Never hold the database during an API call.** SQLite allows one writer at a time. Every slow call happens with the connection closed, which fixed a "database is locked" bug.
+
+**Cut what doesn't work.** RepVue and exact Glassdoor-page lookups were unreliable and slow (wrong-company matches, search errors). They're replaced by an instant Glassdoor search link that never points to the wrong company.
+
+---
 
 ## Tech stack
-| Layer | Tool |
-|---|---|
-| Language | Python |
-| Data source | Jobo ATS Jobs DB via RapidAPI |
-| HTTP | `requests` |
-| Secrets | `.env` + `python-dotenv` |
-| Database | SQLite (`sqlite3`) |
-| Web app | FastAPI + Uvicorn |
-| Pages | Jinja2 templates, HTML/CSS |
 
-## Project structure
+- **Backend:** Python, FastAPI, SQLite
+- **Frontend:** Jinja templates, HTML/CSS, a little JavaScript
+- **APIs:** OpenAI (gpt-4o-mini), Exa (company and news search), Blitz (contacts), a jobs API via RapidAPI
 
-Landly/
-├── fetch_jobs.py # Calls the API (both searches, all pages), caches to jobs_all.json
-├── load_jobs.py # Pipeline: load → clean → filter → dedupe → save to landly.db
-├── main.py # FastAPI web app: serves the jobs page with filters
-├── templates/
-│ └── jobs.html # Jobs page (Jinja2 template)
-├── static/
-│ └── style.css # Page styling
-├── .env # API key (not committed)
-└── README.md
+---
 
+## Running it locally
 
-## How to run
-1. Activate the virtual environment: `source .venv/bin/activate`
-2. Add your RapidAPI key to `.env`: `RAPIDAPI_KEY=your_key`
-3. **Update the jobs:** in `load_jobs.py`, set `FETCH_FROM_API`:
-   - `True`: fetch fresh jobs from the API (about 3 requests) and cache them in `jobs_all.json`
-   - `False`: use the cached `jobs_all.json` (no requests, for testing)
+```bash
+git clone <repo-url>
+cd Landly
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-   Then run `python3 load_jobs.py`
-4. **Start the web app:** `uvicorn main:app --reload`
-5. Open `http://localhost:8000/jobs`
+Create a `.env` file (never commit it):
+```
+RAPIDAPI_KEY=...
+OPENAPI_KEY=...
+EXA_API_KEY=...
+BLITZAPI_KEY=...
+```
 
-## Data source
-- Jobo ATS Jobs DB via RapidAPI (free plan)
-  - Limits: 5,000 jobs/month, 1,000 requests/month, 10 requests/hour
-  - Pulls from company career sites (Greenhouse, Lever, Ashby, Workday...), so fewer agency posts and full descriptions
-- Two searches, because they return different jobs:
-  - `q="Sales Development Representative"`
-  - `q="Business Development Representative"`
-- Fetches every page of results (`total_pages`), 100 jobs per page
-- Responses are cached to `jobs_all.json` to stay within the rate limit while developing
-- Rejected: LinkedIn and Indeed (scraping against terms), Google jobs (no API), Adzuna/Reed (commercial-use limits; may revisit)
+```bash
+python3 load_jobs.py          # fetch + store jobs
+uvicorn main:app --reload     # open http://127.0.0.1:8000/jobs
+```
 
-## Data model (one job)
-| Field | Jobo key | Notes |
-|---|---|---|
-| source_job_id | `id` | Jobo's ID, unique across all jobs (not `external_id`, which can clash between companies) |
-| title | `title` | |
-| company_name | `company.name` | |
-| company_website | `company.website` | Used for duplicate detection and the "Company site" button |
-| company_categories | `company.categories` | Used by the tech filter |
-| company_industries | `company.industries` | Used by the tech filter |
-| occupation_id | `occupation.id` | Used by the SDR filter |
-| locations | `locations` | Full list (a job can have several) |
-| place | worked out | First location's city → country → "Unknown" |
-| description | `description` | Used by the agency filter |
-| date_posted | `date_posted` | ISO format, so it sorts correctly |
-| source | `source` | Which ATS |
-| link | `listing_url` | Job description page |
-| first_seen | set by Landly | Date Landly first saw the job |
-| last_seen | set by Landly | Date Landly last saw the job |
-| rejection_reason | set by Landly | Rejected jobs only: "not sdr", "not tech", "agency" or "duplicate" |
+**Cost per new prospecting plan:** about $0.20 of Exa, a fraction of a penny of OpenAI, and up to 6 Blitz records. Cached plans are free.
 
-## Rules
-- **SDR/BDR filter:** keep if `occupation_id == "jobo:sales-development-representative"` **or** (the title contains "sales development representative" or "business development representative" **and** doesn't contain "manager"). The title fallback catches roles Jobo mislabels (e.g. Epicor, Carwow). The manager check keeps out roles like "SDR Manager".
-- **Tech filter:** keep if the company is on the `always_keep` list, **or** categories contain `saas`, **or** industries include Software, Custom Software & IT Services, Security Products & Services, or Credit Cards & Transaction Processing. "Research & Development" is excluded on purpose, as Jobo tags non-tech companies with it.
-- **always_keep:** Multiplier, SentinelOne, Carwow, Searchable, Deliveroo. Tech companies whose Jobo data is missing or incomplete.
-- **Agency filter:** reject if the company name is on a blocklist (Lifelancer, ManpowerGroup Talent Solutions, Excelerate360, Huzzle) **or** the description contains a precise phrase ("curated by", "on behalf of our client"). "our client" and the HR & Staffing industry were rejected as rules because they also matched real tech companies.
-- **Duplicates (within one run):** a composite dedupe key of cleaned company domain + lowercased title + place. The first job with each key is kept, and later copies are rejected. Domain beats company name: it catches "First Mile" vs "First Mile | Certified B Corp". The same title in a different city counts as a separate job. Companies with no website fall back to the company name.
-- **Duplicates (across runs):** the database blocks repeats by `source_job_id`. An upsert updates `last_seen` for jobs it already has, and leaves `first_seen` unchanged.
-- **Location:** a job with London AND Lisbon is included
+---
 
-## Flow
-1. **Fetch:** call the API for both searches, all pages, and cache to `jobs_all.json`
-2. **Transform:** convert each job from Jobo's format into my data model
-3. **Filter:** SDR → tech → agency → duplicates. Each step only checks the jobs that passed the one before. Rejected jobs are tagged with a `rejection_reason` and saved to `rejected_jobs.json`.
-4. **Save:** upsert into SQLite (`landly.db`)
-5. **Display:** FastAPI reads `landly.db` and fills the `jobs.html` template, newest first
-   - Filters come from the URL, e.g. `/jobs?city=London&days=7`
-   - The SQL `WHERE` clause is built only from the filters chosen, using `?` placeholders
+## Known limitations
 
-## Functions
-| Function | File | Goes in | Comes out |
-|---|---|---|---|
-| `fetch_all_pages` | fetch_jobs.py | search term | all jobs from every page |
-| `fetch_and_save` | fetch_jobs.py | (nothing) | runs both searches, saves `jobs_all.json` |
-| `load_jobs` | load_jobs.py | file name | list of raw jobs |
-| `clean_jobs` | load_jobs.py | raw jobs | clean jobs |
-| `keep_only_sdrs` | load_jobs.py | clean jobs | SDR jobs, rejected |
-| `keep_tech_jobs` | load_jobs.py | SDR jobs | tech jobs, rejected |
-| `remove_agencies` | load_jobs.py | tech jobs | rejected, non-agency jobs |
-| `remove_duplicates` | load_jobs.py | non-agency jobs | rejected, unique jobs |
-| `save_jobs` | load_jobs.py | jobs, file name | (writes a JSON file) |
-| `create_database` | load_jobs.py | (nothing) | creates the jobs table |
-| `save_to_database` | load_jobs.py | jobs | (upserts into SQLite) |
-| `count_jobs_in_database` | load_jobs.py | (nothing) | number of rows |
-| `get_jobs` | main.py | city, days | matching jobs, newest first |
-| `show_jobs` | main.py | request, city, days (from the URL) | the filled-in jobs page |
+- Blitz can occasionally return someone who has left the company; filtering on current role is next.
+- Plans are only as good as recent public news. Some weeks, a company has no strong triggers.
+- Every plan should be read and edited before sending. It's a strong first draft, not a finished one.
+- Contact data is personal data. Landly is for personal use only and isn't deployed publicly.
 
-## Results (live run, 9 Nov 2026)
-202 fetched → 201 (SDR) → 175 (tech) → 173 (agency) → 159 (unique). 43 rejected. 159 jobs in the database.
+---
 
-## Progress
-- [x] Fetch from the API (both searches, all pages, cached)
-- [x] Transform
-- [x] Filters: SDR (with title fallback), tech (with always_keep), agency
-- [x] Duplicates (within a run and across runs)
-- [x] Save rejected jobs with reasons
-- [x] Save to database (SQLite, with upsert)
-- [x] Refactor into functions
-- [x] One command runs the whole pipeline
-- [x] Display: FastAPI web app with styled job cards
-- [x] Filters on the page: city and date posted
-- [x] Run daily on a schedule
-- [ ] Phase 2: research links, AI summaries, AI outreach, decision-maker enrichment
+## How this was built
 
-## Known gaps
-- Jobs whose only locations are outside the UK (e.g. EvenUp, US) aren't filtered out yet. Fix: keep a job only if at least one location has `country == "United Kingdom"`.
-- Jobo's company data is sometimes missing or incomplete, so the tech filter needs a manual `always_keep` list
-- Jobo occasionally mislabels SDR roles with other occupation IDs (handled by the title fallback)
-- `posted_after` in `fetch_jobs.py` is a fixed date. It should be worked out as "30 days ago" each run.
-- The API's `total` for the BDR search may be capped at 100. Not yet confirmed.
-
-## Daily schedule
-   cron runs the pipeline at 8am daily, fetching the last 2 days of jobs:
-   0 8 * * * cd /Users/josh/code/Landly && FETCH_FROM_API=true /Users/josh/code/Landly/.venv/bin/python load_jobs.py >> /Users/josh/code/Landly/cron.log 2>&1
-   (Only runs if the Mac is awake at 8am.)
+I'm currently learning Python & SQL and I broke into tech sales at 20 years old with no degree or sales job experience. I wrote the early parts myself by hand (fetching jobs, loading them into SQLite, the first summaries). For the larger features, I used Claude Code and worked as the product owner and reviewer. I decided what "good" looked like (my email and cold call frameworks, quality over quantity, dropping features that didn't work), tested the output against my sales experience, and pushed back on weak results. I've reviewed the codebase function by function so I can explain how and why it works.

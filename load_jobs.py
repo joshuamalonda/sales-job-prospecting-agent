@@ -243,5 +243,4 @@ def count_jobs_in_database():
 
 # Calling the function and printing the amount of jobs that are in the database
 save_to_database(unique_jobs)
-print(count_jobs_in_database())
 

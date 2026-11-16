@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ job.company_name }} – Landly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="container" data-company="{{ job.company_name }}">
+        <a class="back-link" href="/jobs{% if request.url.query %}?{{ request.url.query }}{% endif %}">&larr; Back to jobs</a>
+
+        <section class="detail-card detail-header">
+            <h1 class="company">{{ job.company_name }}</h1>
+            <p class="title">{{ job.title }}</p>
+            <div class="meta">
+                <span class="place">{{ job.place }}</span>
+                <span class="date">Posted {{ job.date_posted[:10] }}</span>
+            </div>
+            <a class="btn-primary btn-block" href="{{ job.link }}" target="_blank" rel="noopener">View job posting</a>
+            <a class="btn-primary btn-block" href="/jobs/{{ job.source_job_id|urlencode }}/plan" target="_blank" rel="noopener" style="margin-top: 8px">Build prospecting plan</a>
+            {# A small form, because marking as applied changes data (POST). The query string keeps my list filters. #}
+            <form class="applied-form" method="post" action="/jobs/{{ job.source_job_id|urlencode }}/applied{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+                {% if job.applied_at %}
+                    <button class="btn-secondary btn-block btn-applied" type="submit" title="Applied on {{ job.applied_at }} - click to undo">Applied ✓ - undo</button>
+                {% else %}
+                    <button class="btn-secondary btn-block" type="submit">Mark as applied</button>
+                {% endif %}
+            </form>
+        </section>
+
+        <section class="detail-card">
+            <h2 class="section-label">Research</h2>
+            <div class="link-group">
+                <a class="btn-secondary" href="{{ job.company_website }}" target="_blank" rel="noopener">Company site</a>
+                <a class="btn-secondary" href="https://www.glassdoor.co.uk/Search/results.htm?keyword={{ job.company_name|urlencode }}" target="_blank" rel="noopener">Glassdoor</a>
+
+                {% if job.company_linkedin_url %}
+                    <a class="btn-secondary" href="{{ job.company_linkedin_url }}" target="_blank" rel="noopener">LinkedIn</a>
+                {% else %}
+                    <a class="btn-secondary" href="https://www.linkedin.com/search/results/companies/?keywords={{ job.company_name|urlencode }}" target="_blank" rel="noopener">LinkedIn</a>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="detail-card">
+            <h2 class="section-label">Company summary</h2>
+            <div id="summary" class="summary-body">Loading summary...</div>
+        </section>
+
+        <section class="detail-card">
+            <h2 class="section-label">Decision makers</h2>
+            <button id="find-contacts" class="btn-secondary" type="button">Find decision makers</button>
+            <div id="contacts" aria-live="polite"></div>
+        </section>
+    </main>
+
+    <script>
+        const company = document.querySelector("main").dataset.company;
+
+        // Company summary: load it straight away
+        (async () => {
+            const summaryBox = document.getElementById("summary");
+            try {
+                const response = await fetch("/summary?company=" + encodeURIComponent(company));
+                if (!response.ok) throw new Error("Request failed: " + response.status);
+                const data = await response.json();
+                if (typeof data.summary !== "string") throw new Error("No summary in response");
+                summaryBox.textContent = data.summary;
+            } catch (error) {
+                summaryBox.textContent = "Couldn't load summary";
+            }
+        })();
+
+        // Decision makers: only on click, and only once (each lookup costs credits)
+        const contactsButton = document.getElementById("find-contacts");
+        const contactsBox = document.getElementById("contacts");
+        let contactsStatus = "not-loaded";
+
+        function showMessage(text) {
+            contactsBox.replaceChildren();
+            const message = document.createElement("p");
+            message.className = "status-text";
+            message.textContent = text;
+            contactsBox.appendChild(message);
+        }
+
+        contactsButton.addEventListener("click", async () => {
+            if (contactsStatus !== "not-loaded") return;
+
+            contactsStatus = "loading";
+            contactsButton.disabled = true;
+            showMessage("Finding decision makers...");
+
+            try {
+                const response = await fetch("/contacts?company=" + encodeURIComponent(company));
+                if (!response.ok) throw new Error("Request failed: " + response.status);
+                const data = await response.json();
+                if (data.error) throw new Error("Lookup failed");
+
+                contactsStatus = "loaded";
+                contactsButton.hidden = true;
+
+                if (!data.contacts || data.contacts.length === 0) {
+                    showMessage("No decision makers found");
+                    return;
+                }
+
+                const list = document.createElement("ul");
+                list.className = "contact-list";
+                data.contacts.forEach((person) => {
+                    const item = document.createElement("li");
+                    item.className = "contact-item";
+
+                    const name = document.createElement("span");
+                    name.className = "contact-name";
+                    name.textContent = person.full_name;
+
+                    const title = document.createElement("span");
+                    title.className = "contact-title";
+                    title.textContent = person.title || "";
+
+                    item.append(name, title);
+
+                    if (person.linkedin_url) {
+                        const link = document.createElement("a");
+                        link.className = "contact-link";
+                        link.href = person.linkedin_url;
+                        link.target = "_blank";
+                        link.rel = "noopener";
+                        link.textContent = "LinkedIn";
+                        item.appendChild(link);
+                    }
+
+                    list.appendChild(item);
+                });
+                contactsBox.replaceChildren(list);
+            } catch (error) {
+                showMessage("Lookup failed - try again later");
+                contactsStatus = "not-loaded";
+                contactsButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

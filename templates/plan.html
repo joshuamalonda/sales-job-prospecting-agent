@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prospecting plan – {{ pack.company }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* ---------- Screen: a white A4-width "sheet" on the app's grey background ---------- */
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      max-width: 210mm; margin: 32px auto 12px; padding: 0 16px;
+    }
+    .toolbar-right { display: flex; align-items: center; gap: 8px; }
+    .rebuild-link { font-size: 13px; color: var(--muted); text-decoration: none; margin-left: 4px; }
+    .rebuild-link:hover { color: var(--accent); text-decoration: underline; }
+    .edit-status { font-size: 13px; color: var(--muted); }
+    [hidden] { display: none !important; }
+    /* While editing, outline the document so it's obvious it can be typed into */
+    .doc[contenteditable="true"] { outline: 2px dashed var(--accent); outline-offset: -10px; }
+
+    .sheet {
+      max-width: 210mm; margin: 0 auto 48px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-md);
+    }
+    .sheet-table { width: 100%; border-collapse: collapse; }
+    .sheet-table td { padding: 0; }
+    .page-space { height: 0; }                  /* only used in print, see below */
+    .doc { padding: 44px 52px 48px; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+
+    /* ---------- Document typography ---------- */
+    .eyebrow {
+      font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+    }
+    .doc h1 { margin-top: 6px; font-size: 26px; font-weight: 700; letter-spacing: -.02em; color: var(--text); line-height: 1.25; }
+
+    .doc section { margin-top: 28px; }
+    .doc h2 {
+      margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+      font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
+    }
+    .doc p { margin: 0; }
+    .doc a { color: var(--accent); text-decoration: none; }
+    .doc a:hover { text-decoration: underline; }
+    .lead { font-size: 15px; color: var(--text); }
+
+    .facts { display: grid; grid-template-columns: 150px 1fr; gap: 8px 20px; margin: 14px 0 0; }
+    .facts dt { font-weight: 600; color: var(--text); }
+    .facts dd { margin: 0; }
+
+    .triggers { margin: 0; padding-left: 18px; }
+    .triggers li + li { margin-top: 4px; }
+
+    /* ---------- Accounts ---------- */
+    .account { padding: 16px 0; border-top: 1px solid var(--border); }
+    .account:first-of-type { border-top: 0; padding-top: 4px; }
+    .account-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .account-num {
+      flex: none; display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 50%;
+      font-size: 12px; font-weight: 600; color: #fff; background: var(--accent);
+      transform: translateY(-1px);
+    }
+    .account h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+    .account h3 a { color: inherit; }
+    .domain { font-size: 13px; color: var(--muted); }
+
+    .account-body { margin-top: 10px; display: grid; grid-template-columns: 120px 1fr; gap: 6px 16px; }
+    .account-body dt { font-weight: 600; color: var(--text); }
+    .account-body dd { margin: 0; }
+    .source { font-size: 13px; color: var(--muted); }
+
+    blockquote {
+      margin: 6px 0 2px; padding: 2px 0 2px 12px;
+      border-left: 2px solid var(--border-hover); font-style: italic; color: var(--muted);
+    }
+    .opener {
+      margin-top: 12px; padding: 10px 14px; border-radius: var(--radius-sm);
+      background: #eef2ff; border-left: 3px solid var(--accent); color: var(--text);
+    }
+    .opener .opener-label {
+      display: block; margin-bottom: 2px;
+      font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
+    }
+
+    .empty { color: var(--muted); font-style: italic; }
+
+    /* ---------- My approach: 24-day cadence as a vertical timeline ---------- */
+    .cadence-title { font-size: 15px; font-weight: 600; color: var(--text); }
+    .cadence-title span { font-weight: 500; color: var(--muted); }
+    .cadence-intro { margin-top: 2px; }
+    .steps { list-style: none; margin: 16px 0 0; padding: 0; }
+    .step { position: relative; display: grid; grid-template-columns: 22px 1fr; gap: 0 14px; padding-bottom: 16px; }
+    .step:last-child { padding-bottom: 0; }
+    /* Thin connector line between the numbered dots */
+    .step:not(:last-child)::before {
+      content: ""; position: absolute; left: 10.5px; top: 24px; bottom: 2px; width: 1px; background: var(--border);
+    }
+    .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 50%;
+      font-size: 12px; font-weight: 600; color: var(--accent); background: #eef2ff; border: 1px solid #c7d2fe;
+    }
+    .step-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    .step-day {
+      font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
+    }
+    .step-name { font-weight: 600; color: var(--text); }
+    .step-body { margin-top: 2px; }
+    .step-note { margin-top: 2px; font-size: 13px; color: var(--muted); }
+
+    /* ---------- Outreach (email + cold call) under the strongest account ---------- */
+    .outreach { margin: 4px 0 16px 32px; display: grid; gap: 12px; }
+    .outreach-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; background: #fff; }
+    .outreach-label {
+      font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
+    }
+    .outreach-to { margin-top: 2px; font-size: 13px; color: var(--muted); }
+    .subject { margin-top: 8px; font-weight: 600; color: var(--text); }
+    .subject span { font-weight: 500; color: var(--muted); }
+    .email-body { margin-top: 8px; white-space: pre-line; color: var(--text); }
+    .call-steps { margin: 8px 0 0; padding-left: 20px; }
+    .call-steps li { padding-left: 4px; }
+    .call-steps li + li { margin-top: 8px; }
+    .call-steps .step-name { display: block; }
+    .call-steps .guidance { font-style: italic; color: var(--muted); }
+    .roleplay {
+      margin: 0; padding: 12px 16px; border-radius: var(--radius-sm);
+      background: #eef2ff; color: var(--text); font-weight: 500;
+    }
+    .linkedin-text { color: var(--muted); }
+    /* Source sits on its own line; long URLs wrap instead of running off the page */
+    .source { display: block; margin-top: 2px; overflow-wrap: anywhere; }
+
+    @media (max-width: 640px) {
+      .outreach { margin-left: 0; }
+      .doc { padding: 28px 20px; }
+      .facts, .account-body { grid-template-columns: 1fr; gap: 2px; }
+      .facts dd, .account-body dd { margin-bottom: 8px; }
+    }
+
+    /* ---------- Print / Save as PDF ---------- */
+    /* margin: 0 removes the space where browsers print the date, title and localhost URL. */
+    @page { size: A4; margin: 0; }
+
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .sheet { max-width: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+      /* With a zero page margin, text on page 2+ would touch the paper edge. Browsers repeat a
+         table's <thead> and <tfoot> on every printed page, so these empty rows act as a
+         top and bottom margin on EVERY page. Left/right margins come from .doc padding. */
+      .page-space { height: 14mm; }
+      .doc { padding: 0 18mm; font-size: 10.5pt; }
+      .doc h1 { font-size: 20pt; }
+      .doc a { color: var(--text-secondary); }
+      .doc h3 a { color: var(--text); }
+      .doc h2 { break-after: avoid; }
+      .account { break-inside: avoid; }          /* keep each account whole; sections can split */
+      .opener { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .account-num { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .step { break-inside: avoid; }
+      .step-num { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .outreach-card { break-inside: avoid; }
+      .roleplay { break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .doc[contenteditable="true"] { outline: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn-primary" type="button" onclick="window.print()">Save as PDF</button>
+    <div class="toolbar-right">
+      <span class="edit-status" id="edit-status">{% if edited_html %}Showing your edited version{% endif %}</span>
+      <button class="btn-secondary" type="button" id="edit-btn">Edit</button>
+      <button class="btn-primary" type="button" id="save-btn" hidden>Save edits</button>
+      <button class="btn-secondary" type="button" id="cancel-btn" hidden>Cancel</button>
+      <a class="rebuild-link" href="/jobs/{{ source_job_id|urlencode }}/plan?refresh=true"
+         onclick="return confirm('Rebuilding costs about $0.20 of Exa searches plus Blitz credits, and it DISCARDS any edits you have saved. Rebuild the plan?')">Rebuild plan</a>
+    </div>
+  </div>
+
+  <article class="sheet">
+    <table class="sheet-table">
+      <thead><tr><td><div class="page-space"></div></td></tr></thead>
+      <tfoot><tr><td><div class="page-space"></div></td></tr></tfoot>
+      <tbody><tr><td>
+        <div class="doc" id="doc">
+          {% if edited_html %}
+            {# The hand-edited version saved from this page. Only I write it, so it's rendered as HTML. #}
+            {{ edited_html | safe }}
+          {% else %}
+          <header>
+            <p class="eyebrow">Prospecting plan</p>
+            <h1>How I'd prospect for {{ pack.company }}</h1>
+          </header>
+
+          <section>
+            <h2>Who {{ pack.company }} sells to</h2>
+            <p class="lead">{{ pack.icp.summary }}</p>
+            <dl class="facts">
+              {% if pack.icp.problem %}
+                <dt>Why they say yes</dt><dd>{{ pack.icp.problem }}</dd>
+              {% endif %}
+              <dt>Target accounts</dt><dd>{{ pack.icp.target_customers }}</dd>
+              <dt>Who I'd contact</dt><dd>{{ pack.icp.buyer_titles | join(", ") }}</dd>
+            </dl>
+          </section>
+
+          <section>
+            <h2>Triggers I'd watch for</h2>
+            <ul class="triggers">
+              {% for trigger in pack.icp.trigger_types %}<li>{{ trigger }}</li>{% endfor %}
+            </ul>
+          </section>
+
+          <section>
+            <h2>Accounts I'd go for</h2>
+            {% if not pack.accounts %}
+              <p class="empty">No accounts passed my quality bar this week - I'd rather send none than weak ones.</p>
+            {% endif %}
+            {% for a in pack.accounts %}
+              <div class="account">
+                <div class="account-head">
+                  <span class="account-num">{{ loop.index }}</span>
+                  <h3><a href="{{ a.url }}" target="_blank" rel="noopener">{{ a.name }}</a></h3>
+                  <span class="domain">{{ a.url.split("//")[-1].split("/")[0].replace("www.", "") }}</span>
+                </div>
+                <dl class="account-body">
+                  <dt>Trigger</dt>
+                  <dd>{{ a.trigger }}
+                    {# The full link is printed as visible text so it still works in the PDF #}
+                    <span class="source">Source: <a href="{{ a.evidence_url }}" target="_blank" rel="noopener">{{ a.evidence_url | short_url }}</a>{% if a.evidence_date %} ({{ a.evidence_date }}){% endif %}</span>
+                    <blockquote>"{{ a.evidence_quote }}"</blockquote>
+                  </dd>
+                  <dt>Why now</dt>
+                  <dd>{{ a.why_now }}</dd>
+                  <dt>Who I'd call</dt>
+                  <dd>
+                    {% if a.buyer %}
+                      {{ a.buyer.name }}{% if a.buyer.title %}, {{ a.buyer.title }}{% endif %}
+                      {% if a.buyer.linkedin %}
+                        {# The URL is printed as visible text so it still works in the PDF #}
+                        – <a class="linkedin-text" href="{{ a.buyer.linkedin }}" target="_blank" rel="noopener">{{ a.buyer.linkedin | short_url }}</a>
+                      {% endif %}
+                    {% else %}
+                      {{ a.persona }}
+                    {% endif %}
+                  </dd>
+                </dl>
+                {% if a.opening_line %}
+                  <p class="opener"><span class="opener-label">Opening line</span>"{{ a.opening_line }}"</p>
+                {% endif %}
+              </div>
+              {# Email + call script only for the strongest account (chosen in prospecting.py).
+                 Kept outside .account so a long script can't push the whole account onto a new page. #}
+              {% set o = pack.outreach %}
+              {% if o and o.account_url == a.url %}
+                <div class="outreach">
+                  <div class="outreach-card">
+                    <p class="outreach-label">Email</p>
+                    {% if a.buyer %}<p class="outreach-to">To: {{ a.buyer.name }}{% if a.buyer.title %}, {{ a.buyer.title }}{% endif %}{% if a.buyer.linkedin %} – {{ a.buyer.linkedin | short_url }}{% endif %}</p>{% endif %}
+                    <p class="subject"><span>Subject:</span> {{ o.subject }}</p>
+                    <p class="email-body">{{ o.email }}</p>
+                  </div>
+                  <div class="outreach-card">
+                    <p class="outreach-label">Cold call script</p>
+                    <ol class="call-steps">
+                      <li><span class="step-name">Opener</span>"{{ o.call.opener }}"</li>
+                      <li><span class="step-name">Reason for the call</span>"{{ o.call.reason }}"</li>
+                      <li><span class="step-name">Question</span>"{{ o.call.question }}"</li>
+                      <li><span class="step-name">Then</span><span class="guidance">{{ o.call.guidance }}</span></li>
+                    </ol>
+                  </div>
+                  <p class="roleplay">I'm happy to do a mock cold call roleplay with you to show how I'd handle this on a live call.</p>
+                </div>
+              {% endif %}
+            {% endfor %}
+          </section>
+
+          <section>
+            <h2>My approach</h2>
+            <p class="cadence-title">Prospecting strategy <span>· 24-day cadence</span></p>
+            <p class="cadence-intro">Create familiarity before the call, then keep the account warm across multiple channels and touchpoints.</p>
+            <ol class="steps">
+              <li class="step">
+                <span class="step-num">1</span>
+                <div>
+                  <div class="step-head"><span class="step-day">Day 1</span><span class="step-name">First touch</span></div>
+                  <p class="step-body">Personalised email, LinkedIn connection note and a phone call.</p>
+                  <p class="step-note">No pickup: leave a voicemail referencing the email.</p>
+                </div>
+              </li>
+              <li class="step">
+                <span class="step-num">2</span>
+                <div>
+                  <div class="step-head"><span class="step-day">Day 3–5</span><span class="step-name">Add a personal touch</span></div>
+                  <p class="step-body">Automated email, plus a Loom video or a voice note on LinkedIn.</p>
+                  <p class="step-note">Connection request still not accepted: engage with their posts and use InMail.</p>
+                </div>
+              </li>
+              <li class="step">
+                <span class="step-num">3</span>
+                <div>
+                  <div class="step-head"><span class="step-day">Day 9–12</span><span class="step-name">Call and follow up</span></div>
+                  <p class="step-body">Cold call, follow-up email and a LinkedIn follow-up.</p>
+                  <p class="step-note">No pickup: leave a voice note referencing the pain.</p>
+                </div>
+              </li>
+              <li class="step">
+                <span class="step-num">4</span>
+                <div>
+                  <div class="step-head"><span class="step-day">Day 13–21</span><span class="step-name">Keep the account warm</span></div>
+                  <p class="step-body">More cold calls and cold emails, following the cadence steps above.</p>
+                </div>
+              </li>
+              <li class="step">
+                <span class="step-num">5</span>
+                <div>
+                  <div class="step-head"><span class="step-day">Day 24</span><span class="step-name">Close the loop</span></div>
+                  <p class="step-body">Final email offering to close the loop, then move the account into an email nurture sequence.</p>
+                  <p class="step-note">Revisit the account in a couple of months.</p>
+                </div>
+              </li>
+            </ol>
+          </section>
+          {% endif %}
+        </div>
+      </td></tr></tbody>
+    </table>
+  </article>
+
+  <script>
+    // Edit mode: make the document typeable, then send the edited HTML to the server to keep.
+    const doc = document.getElementById("doc");
+    const editBtn = document.getElementById("edit-btn");
+    const saveBtn = document.getElementById("save-btn");
+    const cancelBtn = document.getElementById("cancel-btn");
+    const status = document.getElementById("edit-status");
+
+    editBtn.addEventListener("click", () => {
+      doc.contentEditable = "true";
+      doc.focus();
+      editBtn.hidden = true;
+      saveBtn.hidden = false;
+      cancelBtn.hidden = false;
+      status.textContent = "Editing - click into the plan and type";
+    });
+
+    // Cancel = throw away unsaved changes by reloading the saved version
+    cancelBtn.addEventListener("click", () => location.reload());
+
+    saveBtn.addEventListener("click", async () => {
+      doc.contentEditable = "false";          // so the saved HTML isn't stuck in edit mode
+      saveBtn.disabled = true;
+      status.textContent = "Saving...";
+      try {
+        const response = await fetch("/jobs/{{ source_job_id|urlencode }}/plan/edits", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({html: doc.innerHTML}),
+        });
+        if (!response.ok) throw new Error("Save failed: " + response.status);
+        location.reload();                    // show the saved version from the server
+      } catch (error) {
+        doc.contentEditable = "true";
+        saveBtn.disabled = false;
+        status.textContent = "Couldn't save - try again";
+      }
+    });
+  </script>
+</body>
+</html>
