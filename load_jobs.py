@@ -1,26 +1,21 @@
 import json
+import os
 import sqlite3
 from datetime import date
+
 from fetch_jobs import fetch_and_save
-import os
+from settings import DATABASE_PATH
 
-# Fetch from the API if FETCH_FROM_API=true is set when running (the daily schedule sets it). Other-wise use the cached file.
+# Fetch fresh jobs from the API only if FETCH_FROM_API=true is set when running (my laptop's cron sets it,
+# and the scheduler on Railway always fetches). Otherwise use the cached jobs_all.json.
 FETCH_FROM_API = os.getenv("FETCH_FROM_API") == "true"
-
-# True = get fresh jobs from the API (uses 3 requests). False = use the cached jobs_all.json
-FETCH_FROM_API = True
 
 # job_file is the opened file. Its contents are JSON text, and json.load turns that into Python dicts and lists
 def load_jobs(file_name):
     with open(file_name) as job_file:
         job_data = json.load(job_file)
     return job_data
-# When FETCH_FROM_API = True then call the API and save fresh jobs to jobs_all.json (calling a function from fetch_jobs.py)
-if FETCH_FROM_API:
-    fetch_and_save()
-# Load all the jobs from the json file in Python code then print the total amount of jobs
-raw_jobs = load_jobs("jobs_all.json")
-print(len(raw_jobs))
+
 
 # Creating a function that gets all the job data and transforms it using the data model I created and then stores it in a list
 def clean_jobs(raw_jobs):
@@ -57,8 +52,6 @@ def clean_jobs(raw_jobs):
         all_cleaned_jobs.append(clean_job)
     return all_cleaned_jobs
 
-cleaned = clean_jobs(raw_jobs)
-print(len(cleaned))
 
 # Keep only SDR/BDR roles. Catches non-SDR jobs the title search lets through
 def keep_only_sdrs(cleaned):
@@ -77,9 +70,6 @@ def keep_only_sdrs(cleaned):
             rejected_jobs.append(job)
     return kept_jobs, rejected_jobs
 
-kept_sdrs, reject_sdrs = keep_only_sdrs(cleaned)
-print(len(kept_sdrs))
-print(len(reject_sdrs))
 
 # Industries that count as tech "Research & Development" left out, Jobo tags non-tech firms with it
 def keep_tech_jobs(kept_sdrs):
@@ -104,9 +94,6 @@ def keep_tech_jobs(kept_sdrs):
            rejected_jobs.append(job)
     return tech_jobs, rejected_jobs
 
-tech_jobs, not_tech = keep_tech_jobs(kept_sdrs)
-print(len(tech_jobs))
-print(len(not_tech))
 
 # Creating a function that removes agencies using filters for agency names & agency phrases so at the end we truly get only tech companies
 def remove_agencies(tech_jobs):
@@ -131,19 +118,6 @@ def remove_agencies(tech_jobs):
         else:
             final_jobs.append(job)
     return rejected_jobs, final_jobs
-
-rejected_jobs, final_jobs = remove_agencies(tech_jobs)
-print(len(final_jobs))
-print(len(rejected_jobs))
-
-# Created a new variable that includes all of the rejected jobs from all the filters above
-total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs
-
-print(len(total_rejected_jobs))
-
-# Using a for loop to display the reason why each company was rejected
-for job in total_rejected_jobs:
-    print(job["company_name"], job["rejection_reason"])
 
 # Saves a list of jobs to a JSON file
 def save_jobs(jobs, file_name):
@@ -174,21 +148,11 @@ def remove_duplicates(final_jobs):
            kept.append(job)
     return rejected_jobs, kept
 
-
-duplicate_jobs, unique_jobs = remove_duplicates(final_jobs)
-print(len(unique_jobs))
-print(len(duplicate_jobs))
-
-total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs + duplicate_jobs
-print(len(total_rejected_jobs))
-
-save_jobs(total_rejected_jobs, "rejected_jobs.json")
-
 # Creating a database in SQLite
 def create_database():
      # Opens the database file (creates it if it doesn't exist)
 
-    connection = sqlite3.connect("landly.db")
+    connection = sqlite3.connect(DATABASE_PATH)
 
     # Creates the jobs table, if it isn't there already
     connection.execute("""
@@ -211,11 +175,10 @@ def create_database():
     connection.commit()
     connection.close()
 
-create_database()
 
 # Saves a list of jobs into the jobs table, & now it uses upsert to insert new jobs and update last seen if the job is already in the database
 def save_to_database(unique_jobs):
-    connection = sqlite3.connect("landly.db")
+    connection = sqlite3.connect(DATABASE_PATH)
     for job in unique_jobs:
         connection.execute("""
             INSERT INTO jobs (
@@ -236,11 +199,58 @@ def save_to_database(unique_jobs):
 
 # Counts how many jobs are in the database
 def count_jobs_in_database():
-    connection = sqlite3.connect("landly.db")
+    connection = sqlite3.connect(DATABASE_PATH)
     result = connection.execute("SELECT COUNT(*) FROM jobs").fetchone()
     connection.close()
     return result[0]
 
-# Calling the function and printing the amount of jobs that are in the database
-save_to_database(unique_jobs)
+
+def run(fetch_from_api=FETCH_FROM_API):
+    """The whole daily job load: fetch (optional) -> clean -> filter -> save to the database."""
+    # When fetch_from_api is True, call the API and save fresh jobs to jobs_all.json (a function from fetch_jobs.py)
+    if fetch_from_api:
+        fetch_and_save()
+    # Load all the jobs from the json file in Python code then print the total amount of jobs
+    raw_jobs = load_jobs("jobs_all.json")
+    print(len(raw_jobs))
+
+    cleaned = clean_jobs(raw_jobs)
+    print(len(cleaned))
+
+    kept_sdrs, reject_sdrs = keep_only_sdrs(cleaned)
+    print(len(kept_sdrs))
+    print(len(reject_sdrs))
+
+    tech_jobs, not_tech = keep_tech_jobs(kept_sdrs)
+    print(len(tech_jobs))
+    print(len(not_tech))
+
+    rejected_jobs, final_jobs = remove_agencies(tech_jobs)
+    print(len(final_jobs))
+    print(len(rejected_jobs))
+
+    # Created a new variable that includes all of the rejected jobs from all the filters above
+    total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs
+    print(len(total_rejected_jobs))
+
+    # Using a for loop to display the reason why each company was rejected
+    for job in total_rejected_jobs:
+        print(job["company_name"], job["rejection_reason"])
+
+    duplicate_jobs, unique_jobs = remove_duplicates(final_jobs)
+    print(len(unique_jobs))
+    print(len(duplicate_jobs))
+
+    total_rejected_jobs = reject_sdrs + not_tech + rejected_jobs + duplicate_jobs
+    print(len(total_rejected_jobs))
+
+    save_jobs(total_rejected_jobs, "rejected_jobs.json")
+
+    create_database()
+    save_to_database(unique_jobs)
+
+
+# Only runs when started directly ("python load_jobs.py"), not when another file imports this one
+if __name__ == "__main__":
+    run()
 

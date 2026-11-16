@@ -84,10 +84,14 @@ RAPIDAPI_KEY=...
 OPENAPI_KEY=...
 EXA_API_KEY=...
 BLITZAPI_KEY=...
+APP_USERNAME=...              # login for the whole site (the app won't start without both)
+APP_PASSWORD=...
+# Optional: DATABASE_PATH (default landly.db), MAX_PLANS_PER_DAY (default 10),
+# MAX_CONTACT_LOOKUPS_PER_DAY (default 20), ENABLE_SCHEDULER=true (daily job refresh inside the app)
 ```
 
 ```bash
-python3 load_jobs.py          # fetch + store jobs
+FETCH_FROM_API=true python3 load_jobs.py   # fetch + store jobs (without the flag: reload the cached jobs_all.json)
 uvicorn main:app --reload     # open http://127.0.0.1:8000/jobs
 ```
 
@@ -97,10 +101,10 @@ uvicorn main:app --reload     # open http://127.0.0.1:8000/jobs
 
 ## Known limitations
 
-- Blitz can occasionally return someone who has left the company; filtering on current role is next.
+- Contacts are filtered to people whose *current* job is at the company. Contacts saved before that filter existed aren't re-checked.
 - Plans are only as good as recent public news. Some weeks, a company has no strong triggers.
 - Every plan should be read and edited before sending. It's a strong first draft, not a finished one.
-- Contact data is personal data. Landly is for personal use only and isn't deployed publicly.
+- Contact data is personal data. The deployed app is password-protected and has daily caps on paid lookups.
 
 ---
 

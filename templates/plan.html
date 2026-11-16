@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="{{ static_url('style.css') }}">
   <style>
     /* ---------- Screen: a white A4-width "sheet" on the app's grey background ---------- */
     .toolbar {
@@ -18,6 +18,21 @@
     .rebuild-link { font-size: 13px; color: var(--muted); text-decoration: none; margin-left: 4px; }
     .rebuild-link:hover { color: var(--accent); text-decoration: underline; }
     .edit-status { font-size: 13px; color: var(--muted); }
+    .name-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+    .name-field input {
+      width: 170px; height: 36px; padding: 0 12px; font: inherit; font-size: 14px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    }
+    .name-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+
+    /* Where the user's name goes (top right of the plan + email signature).
+       Until a name is added, it shows a highlighted "Your name" prompt on screen. */
+    .doc-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .doc-author { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; }
+    .name-slot.is-empty {
+      padding: 0 6px; font-weight: 500; color: #92400e;
+      background: #fffbeb; border: 1px dashed #f59e0b; border-radius: 4px;
+    }
     [hidden] { display: none !important; }
     /* While editing, outline the document so it's obvious it can be typed into */
     .doc[contenteditable="true"] { outline: 2px dashed var(--accent); outline-offset: -10px; }
@@ -68,6 +83,9 @@
     .account h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
     .account h3 a { color: inherit; }
     .domain { font-size: 13px; color: var(--muted); }
+    .employees { font-size: 13px; color: var(--muted); }
+    .employees::before { content: "·"; margin-right: 10px; }
+    .verify-note { display: block; margin-top: 2px; font-size: 12px; font-style: italic; color: var(--muted); }
 
     .account-body { margin-top: 10px; display: grid; grid-template-columns: 120px 1fr; gap: 6px 16px; }
     .account-body dt { font-weight: 600; color: var(--text); }
@@ -119,7 +137,6 @@
     .outreach-label {
       font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
     }
-    .outreach-to { margin-top: 2px; font-size: 13px; color: var(--muted); }
     .subject { margin-top: 8px; font-weight: 600; color: var(--text); }
     .subject span { font-weight: 500; color: var(--muted); }
     .email-body { margin-top: 8px; white-space: pre-line; color: var(--text); }
@@ -147,9 +164,19 @@
     /* margin: 0 removes the space where browsers print the date, title and localhost URL. */
     @page { size: A4; margin: 0; }
 
+    /* Review notes: things to fix before sending. Subtle on screen, never printed. */
+    .review-note {
+      margin: 10px 0 0; padding: 8px 12px;
+      font-size: 12.5px; color: #92400e;
+      background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+    }
+    .review-note strong { font-weight: 600; }
+
     @media print {
       body { background: #fff; }
       .toolbar { display: none; }
+      .name-slot.is-empty { display: none; }     /* never print the "Your name" prompt */
+      .review-note { display: none; }
       .sheet { max-width: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
       /* With a zero page margin, text on page 2+ would touch the paper edge. Browsers repeat a
          table's <thead> and <tfoot> on every printed page, so these empty rows act as a
@@ -175,6 +202,9 @@
   <div class="toolbar">
     <button class="btn-primary" type="button" onclick="window.print()">Save as PDF</button>
     <div class="toolbar-right">
+      <label class="name-field">Your name
+        <input type="text" id="your-name" placeholder="Add your name" autocomplete="name">
+      </label>
       <span class="edit-status" id="edit-status">{% if edited_html %}Showing your edited version{% endif %}</span>
       <button class="btn-secondary" type="button" id="edit-btn">Edit</button>
       <button class="btn-primary" type="button" id="save-btn" hidden>Save edits</button>
@@ -194,9 +224,12 @@
             {# The hand-edited version saved from this page. Only I write it, so it's rendered as HTML. #}
             {{ edited_html | safe }}
           {% else %}
-          <header>
-            <p class="eyebrow">Prospecting plan</p>
-            <h1>How I'd prospect for {{ pack.company }}</h1>
+          <header class="doc-header">
+            <div>
+              <p class="eyebrow">Prospecting plan</p>
+              <h1>How I'd prospect for {{ pack.company }}</h1>
+            </div>
+            <p class="doc-author"><span class="name-slot">Your name</span></p>
           </header>
 
           <section>
@@ -207,6 +240,10 @@
                 <dt>Why they say yes</dt><dd>{{ pack.icp.problem }}</dd>
               {% endif %}
               <dt>Target accounts</dt><dd>{{ pack.icp.target_customers }}</dd>
+              {# Plans built before segments existed don't have one - skip the row for those #}
+              {% if pack.icp.segment_label %}
+              <dt>Segment</dt><dd>{{ pack.icp.segment_label }}</dd>
+              {% endif %}
               <dt>Who I'd contact</dt><dd>{{ pack.icp.buyer_titles | join(", ") }}</dd>
             </dl>
           </section>
@@ -223,12 +260,25 @@
             {% if not pack.accounts %}
               <p class="empty">No accounts passed my quality bar this week - I'd rather send none than weak ones.</p>
             {% endif %}
+            {# Only ONE "Review before sending" box per plan: under the opening line of the first account
+               that was flagged, or - if only the email/call script was flagged - under that account's. #}
+            {% set review = namespace(url=None) %}
+            {% for a in pack.accounts %}
+              {% if a.review_notes and review.url is none %}{% set review.url = a.url %}{% endif %}
+            {% endfor %}
+            {% if review.url is none and pack.outreach and pack.outreach.review_notes %}
+              {% set review.url = pack.outreach.account_url %}
+            {% endif %}
             {% for a in pack.accounts %}
               <div class="account">
                 <div class="account-head">
                   <span class="account-num">{{ loop.index }}</span>
                   <h3><a href="{{ a.url }}" target="_blank" rel="noopener">{{ a.name }}</a></h3>
                   <span class="domain">{{ a.url.split("//")[-1].split("/")[0].replace("www.", "") }}</span>
+                  {# Plans built before the size rules have no "employees" key - show nothing for those #}
+                  {% if a.employees is defined %}
+                    <span class="employees">{% if a.employees is not none %}~{{ "{:,}".format(a.employees) }} employees{% else %}headcount unknown{% endif %}</span>
+                  {% endif %}
                 </div>
                 <dl class="account-body">
                   <dt>Trigger</dt>
@@ -247,6 +297,7 @@
                         {# The URL is printed as visible text so it still works in the PDF #}
                         – <a class="linkedin-text" href="{{ a.buyer.linkedin }}" target="_blank" rel="noopener">{{ a.buyer.linkedin | short_url }}</a>
                       {% endif %}
+                      <span class="verify-note">Suggested contact - verify on LinkedIn before reaching out</span>
                     {% else %}
                       {{ a.persona }}
                     {% endif %}
@@ -254,6 +305,10 @@
                 </dl>
                 {% if a.opening_line %}
                   <p class="opener"><span class="opener-label">Opening line</span>"{{ a.opening_line }}"</p>
+                {% endif %}
+                {% if a.url == review.url %}
+                  {# The details stay saved in the plan data; the page just shows the flag #}
+                  <div class="review-note"><strong>Review before sending</strong></div>
                 {% endif %}
               </div>
               {# Email + call script only for the strongest account (chosen in prospecting.py).
@@ -263,9 +318,9 @@
                 <div class="outreach">
                   <div class="outreach-card">
                     <p class="outreach-label">Email</p>
-                    {% if a.buyer %}<p class="outreach-to">To: {{ a.buyer.name }}{% if a.buyer.title %}, {{ a.buyer.title }}{% endif %}{% if a.buyer.linkedin %} – {{ a.buyer.linkedin | short_url }}{% endif %}</p>{% endif %}
                     <p class="subject"><span>Subject:</span> {{ o.subject }}</p>
-                    <p class="email-body">{{ o.email }}</p>
+                    <p class="email-body">{{ o.email.removesuffix("\nJosh") }}
+<span class="name-slot">Your name</span></p>
                   </div>
                   <div class="outreach-card">
                     <p class="outreach-label">Cold call script</p>
@@ -335,6 +390,28 @@
   </article>
 
   <script>
+    // Your name: typed once in the toolbar, filled into every "Your name" spot on the plan,
+    // and remembered in this browser for next time.
+    const nameInput = document.getElementById("your-name");
+
+    function fillNameSlots(name) {
+      document.querySelectorAll(".name-slot").forEach((slot) => {
+        slot.textContent = name || "Your name";
+        slot.classList.toggle("is-empty", !name);
+      });
+    }
+
+    let savedName = "";
+    try { savedName = localStorage.getItem("landly-your-name") || ""; } catch (error) {}
+    nameInput.value = savedName;
+    fillNameSlots(savedName);
+
+    nameInput.addEventListener("input", () => {
+      const name = nameInput.value.trim();
+      fillNameSlots(name);
+      try { localStorage.setItem("landly-your-name", name); } catch (error) {}
+    });
+
     // Edit mode: make the document typeable, then send the edited HTML to the server to keep.
     const doc = document.getElementById("doc");
     const editBtn = document.getElementById("edit-btn");

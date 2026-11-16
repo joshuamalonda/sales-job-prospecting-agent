@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="{{ static_url('style.css') }}">
 </head>
 <body>
     <main class="container" data-company="{{ job.company_name }}">
@@ -99,6 +99,14 @@
                 const response = await fetch("/contacts?company=" + encodeURIComponent(company));
                 if (!response.ok) throw new Error("Request failed: " + response.status);
                 const data = await response.json();
+
+                // Daily cap reached: say so, and leave the button usable for tomorrow
+                if (data.limit_reached) {
+                    showMessage(data.message);
+                    contactsStatus = "not-loaded";
+                    contactsButton.disabled = false;
+                    return;
+                }
                 if (data.error) throw new Error("Lookup failed");
 
                 contactsStatus = "loaded";
@@ -108,6 +116,15 @@
                     showMessage("No decision makers found");
                     return;
                 }
+
+                // Blitz data is a snapshot and can be out of date, so every contact is only a suggestion
+                const verifyNote = document.createElement("p");
+                verifyNote.className = "contacts-note";
+                const verifyText = document.createElement("span");       // one block of text next to the icon
+                const verifyTitle = document.createElement("strong");
+                verifyTitle.textContent = "Suggested contacts.";
+                verifyText.append(verifyTitle, " Verify on LinkedIn before reaching out.");
+                verifyNote.append(verifyText);
 
                 const list = document.createElement("ul");
                 list.className = "contact-list";
@@ -137,7 +154,7 @@
 
                     list.appendChild(item);
                 });
-                contactsBox.replaceChildren(list);
+                contactsBox.replaceChildren(verifyNote, list);
             } catch (error) {
                 showMessage("Lookup failed - try again later");
                 contactsStatus = "not-loaded";

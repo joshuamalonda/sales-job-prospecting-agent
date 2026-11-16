@@ -5,10 +5,11 @@ from datetime import date
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from settings import DATABASE_PATH
+
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAPI_KEY"))
 
-DATABASE = "landly.db"
 
 SYSTEM_PROMPT = """
 You write short company briefs for a sales rep preparing to cold call.
@@ -51,7 +52,7 @@ Problem they solve: In-house lawyers waste hours on repetitive requests and chas
 
 def create_summaries_table():
     """company_summaries = one saved summary per company, so each company is only paid for once."""
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.execute("""
         CREATE TABLE IF NOT EXISTS company_summaries (
             company_name TEXT UNIQUE,
@@ -66,7 +67,7 @@ def create_summaries_table():
 def get_summary(company_name, company_website, description):
     """Return the saved summary, or ask OpenAI for one, save it and return it."""
     # 1. Check the cache (quick read, then close straight away)
-    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     row = connection.execute(
         "SELECT summary FROM company_summaries WHERE company_name = ?", (company_name,)).fetchone()
     connection.close()
@@ -95,7 +96,7 @@ Job description:
     summary = response.choices[0].message.content
 
     # 3. Save it. OR IGNORE: if a double-click already saved one, skip quietly instead of crashing
-    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     connection.execute(
         "INSERT OR IGNORE INTO company_summaries (company_name, summary, created_at) VALUES (?, ?, ?)",
         (company_name, summary, date.today().isoformat()))

@@ -1,22 +1,36 @@
+import os
+import secrets                                   # compare passwords safely (see require_login)
 import sqlite3                                   # Python's built-in SQLite database module
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles      # serves the files in the static/ folder (CSS)
 from fastapi.templating import Jinja2Templates   # fills the HTML templates with data
 
-from contacts import create_contacts_tables, get_decision_makers
-from prospecting import create_packs_table, get_edited_html, get_pack, save_edited_html, territory_for
+from contacts import create_contacts_tables, get_decision_makers, has_contact_lookup
+from load_jobs import create_database as create_jobs_table
+from prospecting import (create_packs_table, get_edited_html, get_pack, has_saved_pack, save_edited_html,
+                         territory_for)
+from scheduler import create_job_runs_table, start_daily_job_refresh
+from settings import (APP_PASSWORD, APP_USERNAME, DATABASE_PATH, ENABLE_SCHEDULER,
+                      MAX_CONTACT_LOOKUPS_PER_DAY, MAX_PLANS_PER_DAY)
+from spend_limits import create_usage_table, use_daily_allowance
 from summaries import create_summaries_table, get_summary
 
-DATABASE = "landly.db"
 MAX_EDIT_SIZE = 500_000          # characters - a saved plan edit bigger than this is rejected
+
+# Never run without a password: stop right here with a clear message instead
+if not APP_USERNAME or not APP_PASSWORD:
+    raise RuntimeError("APP_USERNAME and APP_PASSWORD must both be set (in .env locally, "
+                       "or in Railway's Variables tab). Landly won't start without a login.")
 
 
 def create_applied_table():
     """Companies I've applied to (one row per company, so every job at that company shows as applied)."""
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.execute("""
         CREATE TABLE IF NOT EXISTS applied_companies (
             company_name TEXT UNIQUE,
@@ -27,14 +41,44 @@ def create_applied_table():
     connection.close()
 
 
-# Make sure every table exists before the app starts
+# Make sure every table exists before the app starts (a brand-new database on Railway starts empty)
+create_jobs_table()
 create_packs_table()
 create_contacts_tables()
 create_summaries_table()
 create_applied_table()
+create_usage_table()
+create_job_runs_table()
 
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@asynccontextmanager
+async def lifespan(app):
+    """Runs once when the app starts. The daily job refresh is only switched on where ENABLE_SCHEDULER=true
+    (Railway), so it never runs on my laptop (e.g. every time uvicorn --reload restarts)."""
+    if ENABLE_SCHEDULER:
+        start_daily_job_refresh()
+    yield
+
+
+basic_auth = HTTPBasic()          # makes the browser show its built-in username/password box
+
+
+def require_login(credentials: HTTPBasicCredentials = Depends(basic_auth)):
+    """Runs before every page and API route. Wrong or missing login -> 401 (the browser asks again)."""
+    # compare_digest takes the same time whether the first letter or the last letter is wrong,
+    # so nobody can guess the password one character at a time by timing the replies
+    username_ok = secrets.compare_digest(credentials.username.encode("utf-8"), APP_USERNAME.encode("utf-8"))
+    password_ok = secrets.compare_digest(credentials.password.encode("utf-8"), APP_PASSWORD.encode("utf-8"))
+    if not (username_ok and password_ok):
+        raise HTTPException(status_code=401, detail="Wrong username or password",
+                            headers={"WWW-Authenticate": "Basic"})
+
+
+# dependencies=[...] puts require_login in front of EVERY route.
+# The automatic /docs pages are switched off, because they'd skip the login.
+app = FastAPI(dependencies=[Depends(require_login)], lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+app.mount("/static", StaticFiles(directory="static"), name="static")      # CSS only - fine without a login
 templates = Jinja2Templates(directory="templates")
 
 
@@ -47,6 +91,16 @@ def short_url(url):
 
 
 templates.env.filters["short_url"] = short_url            # lets templates write {{ url|short_url }}
+
+
+def static_url(file_name):
+    """'/static/style.css?v=1731783456' - the number is when the file was last saved.
+    Browsers keep old copies of CSS files; a new number after every save makes them fetch the new one."""
+    last_saved = int(os.path.getmtime(os.path.join("static", file_name)))
+    return f"/static/{file_name}?v={last_saved}"
+
+
+templates.env.globals["static_url"] = static_url          # lets templates write {{ static_url("style.css") }}
 
 
 def get_jobs(city=None, days=None, applied=None):
@@ -78,7 +132,7 @@ def get_jobs(city=None, days=None, applied=None):
 
     sql += " ORDER BY jobs.date_posted DESC"
 
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
     rows = connection.execute(sql, values).fetchall()
     connection.close()
@@ -113,7 +167,7 @@ def show_job(request: Request, source_job_id: str):
              LEFT JOIN contact_lookups ON jobs.company_name = contact_lookups.company_name
              LEFT JOIN applied_companies ON jobs.company_name = applied_companies.company_name
              WHERE jobs.source_job_id = ?"""
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
     row = connection.execute(sql, (source_job_id,)).fetchone()
     connection.close()
@@ -126,7 +180,7 @@ def show_job(request: Request, source_job_id: str):
 @app.post("/jobs/{source_job_id}/applied")
 def toggle_applied(request: Request, source_job_id: str):
     """'Mark as applied' button: adds the company if it isn't saved yet, removes it if it is (undo)."""
-    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     row = connection.execute(
         "SELECT company_name FROM jobs WHERE source_job_id = ?", (source_job_id,)).fetchone()
     if not row:
@@ -155,7 +209,7 @@ def toggle_applied(request: Request, source_job_id: str):
 @app.get("/summary")
 def show_summary(company: str):
     """The company summary on the detail page (cached after the first OpenAI call)."""
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
     sql = "SELECT company_name, company_website, description FROM jobs WHERE company_name = ? LIMIT 1"
     row = connection.execute(sql, (company,)).fetchone()
@@ -169,7 +223,7 @@ def show_summary(company: str):
 def show_contacts(company: str):
     """'Find decision makers' button. Returns {"error": ..., "contacts": [...]}."""
     # Get the company's website from its job listing
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     row = connection.execute(
         "SELECT company_website FROM jobs WHERE company_name = ? LIMIT 1", (company,)).fetchone()
     connection.close()
@@ -178,6 +232,13 @@ def show_contacts(company: str):
         website = row[0]
     else:
         website = None
+
+    # A NEW lookup costs Blitz records, so it counts towards today's cap. Saved contacts are free.
+    # (With no website, Blitz is never called, so there's nothing to count.)
+    is_new_lookup = website and not has_contact_lookup(company)
+    if is_new_lookup and not use_daily_allowance("contacts", company, MAX_CONTACT_LOOKUPS_PER_DAY):
+        return {"error": True, "limit_reached": True, "contacts": [],
+                "message": "Daily lookup limit reached - try again tomorrow."}
 
     try:
         people = get_decision_makers(company, website)
@@ -190,7 +251,7 @@ def show_contacts(company: str):
 @app.get("/jobs/{source_job_id}/plan")
 def show_plan(request: Request, source_job_id: str, refresh: bool = False):
     """The prospecting plan. ?refresh=true rebuilds it (costs money and discards my edits)."""
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     row = connection.execute(
         "SELECT company_name, company_website, place, title FROM jobs WHERE source_job_id = ?",
         (source_job_id,)).fetchone()
@@ -199,6 +260,14 @@ def show_plan(request: Request, source_job_id: str, refresh: bool = False):
         return PlainTextResponse("Job not found.", status_code=404)
 
     company_name, website, place, job_title = row
+
+    # Building a plan costs money (Exa, OpenAI, Blitz), so new builds count towards today's cap.
+    # Viewing a saved plan is free and never counts. (No website = get_pack stops before any API call.)
+    needs_build = refresh or not has_saved_pack(company_name)
+    if needs_build and website and not use_daily_allowance("plan", company_name, MAX_PLANS_PER_DAY):
+        return templates.TemplateResponse(request, "limit_reached.html",
+                                          {"source_job_id": source_job_id}, status_code=429)
+
     territory = territory_for(place, job_title)                     # e.g. "EMEA" from "SDR, EMEA"
     try:
         pack = get_pack(company_name, website, territory, refresh=refresh)
@@ -230,7 +299,7 @@ async def save_plan_edits(request: Request, source_job_id: str):
     if not is_valid:
         return JSONResponse({"ok": False, "error": "Nothing to save, or edit too large"}, status_code=400)
 
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     row = connection.execute(
         "SELECT company_name FROM jobs WHERE source_job_id = ?", (source_job_id,)).fetchone()
     connection.close()

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Daily limit reached – Landly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="{{ static_url('style.css') }}">
+</head>
+<body>
+    <main class="container">
+        <a class="back-link" href="/jobs/{{ source_job_id|urlencode }}">&larr; Back to the job</a>
+        <section class="detail-card">
+            <h1 class="company">Daily plan limit reached - try again tomorrow.</h1>
+            <p class="title">Saved plans still open as normal. Only new plans and rebuilds count towards the limit.</p>
+        </section>
+    </main>
+</body>
+</html>

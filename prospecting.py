@@ -5,18 +5,16 @@ import sqlite3
 from datetime import date, timedelta
 
 import requests
-from dotenv import load_dotenv
 from openai import OpenAI
 
 from contacts import BASE_URL as BLITZ_URL
 from contacts import HEADERS as BLITZ_HEADERS
-from contacts import domain_to_linkedin
+from contacts import current_job_title, domain_to_linkedin
+from settings import DATABASE_PATH
 
-load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAPI_KEY"))
 EXA_HEADERS = {"x-api-key": os.getenv("EXA_API_KEY"), "Content-Type": "application/json"}
 EXA_SEARCH_URL = "https://api.exa.ai/search"
-DATABASE = "landly.db"
 
 # Phrases that make writing sound AI-generated or like guessing. Any account whose
 # why_now or opening_line contains one of these is dropped (checked in code, not just asked for).
@@ -36,6 +34,27 @@ TRIGGER_BANNED = ["digital transformation", "growth plan", "revenue target", "lo
 REGIONS = ["North EMEA", "South EMEA", "Central EMEA", "Northern Europe", "Southern Europe",
            "Nordics", "Benelux", "DACH", "UK&I", "UKI", "Ireland", "France", "Germany", "Spain",
            "Italy", "Netherlands", "EMEA", "Europe", "North America", "APAC", "ANZ", "LATAM"]
+
+# Company size rules for suggested accounts
+MAX_ACCOUNT_EMPLOYEES = 10000    # backstop for obvious giants only - the real limit is the segment's range
+SIZE_TOLERANCE = 0.5             # accept accounts up to 50% outside the segment's employee range
+
+# The model only picks a segment; the employee numbers are fixed here in code.
+# (min, max) employees - None means "no upper limit" (the backstop above still applies).
+SEGMENT_RANGES = {
+    "smb": (1, 200),
+    "mid-market": (200, 2000),
+    "enterprise": (2000, None),
+    "mixed": (200, 10000),
+}
+SEGMENT_NAMES = {"smb": "SMB", "mid-market": "Mid-market", "enterprise": "Enterprise", "mixed": "Mixed"}
+DEFAULT_SEGMENT = "mixed"        # used if the model returns something that isn't one of the four
+
+# Trigger types that never count as a reason to call, whatever the wording (checked on each account)
+ACCOUNT_TRIGGER_BANNED = ["award", "revenue target", "loan"]
+
+# Guessing words that are never allowed in why_now (matched as whole words, see guessing_words_in)
+WHY_NOW_GUESSING = ["may", "might", "could", "likely", "potentially"]
 
 
 def to_domain(website):
@@ -94,7 +113,7 @@ def fetch_website_text(domain):
 
 def get_job_description(company_name):
     """The company's own SDR job ad from our jobs table (the longest one, if several)."""
-    connection = sqlite3.connect(DATABASE, timeout=30)          # quick read, closed before any API call
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)          # quick read, closed before any API call
     row = connection.execute(
         "SELECT description FROM jobs WHERE company_name = ? AND description IS NOT NULL "
         "ORDER BY length(description) DESC LIMIT 1", (company_name,)).fetchone()
@@ -185,10 +204,64 @@ Return JSON with exactly these keys:
 "buyer_titles": 3-5 titles of the people the SDRs contact, exactly as written on LinkedIn, senior enough to say yes
    to the ask (e.g. Founder, CEO, Managing Director, Head of X, VP X). Never analysts or coordinators,
 "fallback_titles": 3-5 broader senior titles at the same kind of company, in case the exact ones don't exist,
+"segment": exactly one of "smb", "mid-market", "enterprise", "mixed" - the size of the companies the SDRs
+   contact (the PROSPECTS, not {company_name} itself). Decide from the job ad first (words like SMB, mid-market,
+   enterprise, strategic accounts, named accounts), then the website (customer logos, case studies, pricing).
+   smb = 1-200 employees, mid-market = 200-2,000, enterprise = 2,000+, mixed = clearly sells across sizes,
 "exa_queries": 3 search queries describing the companies the SDRs contact, headquartered or operating in
-   {territory}, by facts (business model, size, ownership, location, technology). Never {company_name}'s
-   competitors. No company names, no vague words."""
+   {territory}, by facts (business model, size, ownership, location, technology). Include the segment's size
+   band (number of employees) in each query. Never {company_name}'s competitors. No company names, no vague words.
+   Never describe market leaders, household names or big, well-known companies in the space: {company_name}'s
+   sales leader already knows them - they're probably already customers, already being targeted, or have
+   already said no - so suggesting them shows no research. Describe lesser-known, fast-moving companies
+   that fit the target accounts - the kind a sales leader hasn't spotted yet."""
     return ask_openai_for_json(prompt)
+
+
+def to_whole_number(value):
+    """Read a number the model returned: 500 -> 500, "1,000" -> 1000, "50-200" -> 50. None if there's no number."""
+    if isinstance(value, bool):                        # True/False are technically ints in Python - not valid here
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    match = re.search(r"\d+", str(value or "").replace(",", ""))
+    if not match:
+        return None
+    return int(match.group())
+
+
+def read_segment(icp):
+    """The ICP's segment as one of the four SEGMENT_RANGES keys. "Mid Market", "mid_market" -> "mid-market".
+    Anything else falls back to DEFAULT_SEGMENT."""
+    segment = str(icp.get("segment") or "").strip().lower().replace("_", "-").replace(" ", "-")
+    if segment == "midmarket":
+        segment = "mid-market"
+    if segment not in SEGMENT_RANGES:
+        print(f"Segment {icp.get('segment')!r} not recognised - using {DEFAULT_SEGMENT}")
+        return DEFAULT_SEGMENT
+    return segment
+
+
+def describe_segment(segment):
+    """'mid-market' -> 'Mid-market (200-2,000 employees)', 'enterprise' -> 'Enterprise (2,000+ employees)'."""
+    smallest, largest = SEGMENT_RANGES[segment]
+    if largest is None:
+        size = f"{smallest:,}+"
+    else:
+        size = f"{smallest:,}-{largest:,}"
+    return f"{SEGMENT_NAMES[segment]} ({size} employees)"
+
+
+def allowed_employee_range(segment):
+    """The account sizes we accept: the segment's range widened by 50% each way
+    (min x 0.5 to max x 1.5), never above the MAX_ACCOUNT_EMPLOYEES backstop. Returns (lowest, highest).
+    e.g. mid-market 200-2,000 -> (100, 3,000). enterprise 2,000+ -> (1,000, 10,000)."""
+    smallest, largest = SEGMENT_RANGES[segment]
+    lowest = int(smallest * (1 - SIZE_TOLERANCE))
+    highest = MAX_ACCOUNT_EMPLOYEES
+    if largest is not None:
+        highest = min(int(largest * (1 + SIZE_TOLERANCE)), MAX_ACCOUNT_EMPLOYEES)
+    return lowest, highest
 
 
 def ask_openai_for_json(prompt):
@@ -218,12 +291,23 @@ def find_candidates(queries, exclude_domain):
             url = result.get("url", "")
             if exclude_domain in url or url in candidates_by_url:
                 continue
-            # Exa may attach the company's details ("entities"); use its proper name if it's there
+            # Exa may attach the company's details ("entities"): its proper name and headcount
             entities = result.get("entities") or [{}]
             properties = entities[0].get("properties") or {}
             name = properties.get("name") or result.get("title")
-            candidates_by_url[url] = {"name": name, "url": url}
+            workforce = properties.get("workforce") or {}
+            employees = to_whole_number(workforce.get("total"))        # None = Exa doesn't know
+            candidates_by_url[url] = {"name": name, "url": url, "employees": employees}
     return list(candidates_by_url.values())
+
+
+def is_right_size(candidate, lowest, highest):
+    """True if the candidate's headcount is inside the allowed band. Unknown headcount is kept
+    (rank_accounts is told it's unknown and judges size from the evidence)."""
+    employees = candidate.get("employees")
+    if employees is None:
+        return True
+    return lowest <= employees <= highest
 
 
 def find_trigger_evidence(candidate, trigger_types, days=90):
@@ -273,7 +357,8 @@ def parse_strength(value):
 
 
 def check_account(account, evidence_by_account):
-    """Return None if the account passes every check, otherwise a short reason it failed."""
+    """FACT checks only. Return None if the account passes, otherwise a short reason to drop it.
+    Wording problems (banned or guessing words) never drop an account - see fix_why_now and finalise_opener."""
     # 1. The evidence link must belong to THIS account's own search results
     own_evidence = evidence_by_account.get(account.get("url"), {})
     snippet = own_evidence.get(account.get("evidence_url"))
@@ -290,13 +375,75 @@ def check_account(account, evidence_by_account):
     if strength < 4:
         return f"strength {strength} is below 4"
 
-    # 4. No guessing words, compliments or buzzwords in why_now.
-    #    (The opening line is checked separately in finalise_opener - a bad opener doesn't sink the account.)
-    why_now = (account.get("why_now") or "").lower()
-    banned = [phrase for phrase in BANNED_PHRASES if phrase in why_now]
-    if banned:
-        return f"why_now uses banned phrase(s): {', '.join(banned)}"
+    # 4. Awards, revenue targets and loans are never a reason to call, however they're worded
+    trigger = (account.get("trigger") or "").lower()
+    banned_trigger = [phrase for phrase in ACCOUNT_TRIGGER_BANNED if phrase in trigger]
+    if banned_trigger:
+        return f"trigger is a banned type: {', '.join(banned_trigger)}"
     return None
+
+
+def why_now_problems(why_now):
+    """Banned or guessing words in a why_now (empty list = fine)."""
+    problems = [phrase for phrase in BANNED_PHRASES if phrase in (why_now or "").lower()]
+    for word in guessing_words_in(why_now or ""):
+        if word not in problems:
+            problems.append(word)
+    return problems
+
+
+def rewrite_text(account, field_description, text, problems):
+    """One small gpt-4o-mini call: rewrite one piece of text without the listed words, using only the evidence.
+    Returns the new text ("" if the model returned nothing)."""
+    prompt = f"""Rewrite this {field_description} for a sales prospecting plan.
+Account: {account.get('name')}
+Trigger: {account.get('trigger', '')}
+Evidence quote: "{account.get('evidence_quote', '')}"
+Current text: "{text}"
+
+It uses words that aren't allowed: {', '.join(problems)}. Rewrite it without them (and without any other
+guessing word: may, might, could, likely, potentially, suggests, indicates). State only what the evidence shows,
+plainly, like a person. Keep the same meaning and length.
+Return JSON: {{"text": "the rewritten text"}}"""
+    return str(ask_openai_for_json(prompt).get("text") or "").strip()
+
+
+def fix_why_now(account):
+    """If why_now has banned/guessing words: rewrite it once. If it still has them, keep the better
+    version and add a review note - the account is never dropped for wording."""
+    original = account.get("why_now") or ""
+    problems = why_now_problems(original)
+    if not problems:
+        return
+    print(f"  why_now for {account.get('name')} uses {', '.join(problems)} - rewriting once")
+    rewrite = rewrite_text(account, "'why now' (two short sentences)", original, problems)
+    rewrite_problems = why_now_problems(rewrite)
+    if rewrite and not rewrite_problems:
+        account["why_now"] = rewrite
+        return
+    # Still not clean: keep whichever version has fewer problem words, and flag it
+    if rewrite and len(rewrite_problems) <= len(problems):
+        account["why_now"] = rewrite
+        problems = rewrite_problems
+    add_review_note(account, f"Why now: change {', '.join(repr(word) for word in problems)}")
+
+
+def add_review_note(item, note):
+    """A visible 'review before sending' note on an account or the outreach (shown on screen, hidden in print)."""
+    item.setdefault("review_notes", []).append(note)
+
+
+def guessing_words_in(text):
+    """Which WHY_NOW_GUESSING words appear as whole words ("may" yes, "mayor" no).
+    "May" with a capital M is skipped, because that's usually the month ("opened in May")."""
+    found = []
+    for word in WHY_NOW_GUESSING:
+        for match in re.finditer(rf"\b{word}\b", text, re.I):
+            if match.group() == "May":
+                continue
+            found.append(word)
+            break
+    return found
 
 
 def opener_precheck(opener):
@@ -339,31 +486,64 @@ evidence quote. Empty string if pass is true."}}"""
 
 
 def finalise_opener(account, icp):
-    """Judge the opening line; if it fails, try the judge's rewrite once.
-    If that fails too, keep the account but remove the opening line (the account is still useful)."""
-    opener = (account.get("opening_line") or "").strip()
+    """Judge the opening line. If it fails, try one rewrite (the judge's suggestion, or a targeted rewrite
+    if the judge gave none). If that fails too, keep the better of the two lines and flag it for review -
+    a weak opener never removes the line or the account."""
+    original = (account.get("opening_line") or "").strip()
     account["opener_review"] = []                          # judge reasons, kept for debugging
-    for attempt in ("original", "rewrite"):
-        verdict = judge_opener(account, icp, opener)
-        precheck = opener_precheck(opener)
-        passed = verdict["pass"] and precheck is None
+    if not original:
+        return
 
-        reason = verdict["reason"]
-        if precheck:
-            reason += f" [precheck: {precheck}]"
-        result_label = "PASS" if passed else "FAIL"
-        account["opener_review"].append(f"{attempt}: {result_label} - {reason}")
-        print(f"  Judge ({account.get('name')}, {attempt}): {result_label} - {reason}")
+    first = judge_and_check(account, icp, original, "original")
+    if first["passed"]:
+        account["opening_line"] = original
+        return
 
-        if passed:
-            account["opening_line"] = opener
-            return
-        opener = verdict["rewrite"]
-        if attempt == "original" and opener:
-            print(f"    Trying rewrite: {opener}")
-        if not opener:
-            break
-    account["opening_line"] = None
+    # One second attempt: the judge's own rewrite, or a rewrite that just removes the banned words
+    second_line = first["rewrite"]
+    if not second_line and first["precheck"]:
+        second_line = rewrite_text(account, "cold-call opening line (one fact, then exactly one question)",
+                                   original, [first["precheck"]])
+    if not second_line:
+        account["opening_line"] = original
+        add_review_note(account, f"Opening line: {first['reason']}")
+        return
+
+    print(f"    Trying rewrite: {second_line}")
+    second = judge_and_check(account, icp, second_line, "rewrite")
+    if second["passed"]:
+        account["opening_line"] = second_line
+        return
+
+    # Neither passed: keep the better one. A line with no banned words beats one with them;
+    # after that, one the judge liked. On a full tie, the rewrite wins (the original already failed).
+    def how_bad(attempt):
+        # Python compares these pairs left to right: banned words first, then the judge's verdict
+        has_banned_words = attempt["precheck"] is not None
+        judge_failed = not attempt["judge_pass"]
+        return (has_banned_words, judge_failed)
+
+    best = second
+    if how_bad(first) < how_bad(second):
+        best = first
+    account["opening_line"] = best["line"]
+    add_review_note(account, f"Opening line: {best['reason']}")
+
+
+def judge_and_check(account, icp, line, attempt):
+    """Run the AI judge and the cheap banned-word check on one opening line, and log the result."""
+    verdict = judge_opener(account, icp, line)
+    precheck = opener_precheck(line)
+    passed = verdict["pass"] and precheck is None
+
+    reason = verdict["reason"]
+    if precheck:
+        reason += f" [precheck: {precheck}]"
+    result_label = "PASS" if passed else "FAIL"
+    account["opener_review"].append(f"{attempt}: {result_label} - {reason}")
+    print(f"  Judge ({account.get('name')}, {attempt}): {result_label} - {reason}")
+    return {"line": line, "passed": passed, "judge_pass": verdict["pass"], "precheck": precheck,
+            "reason": reason, "rewrite": verdict["rewrite"]}
 
 
 def rank_accounts(icp, candidates, top_n=3):
@@ -380,13 +560,19 @@ Target accounts: {icp['target_customers']}
 Triggers we look for: {icp['trigger_types']}
 Buyer titles: {icp['buyer_titles']}
 
-Candidate accounts, each with recent evidence (title, url, date, snippet):
+Candidate accounts, each with "employees" (headcount; null = unknown) and recent evidence (title, url, date, snippet):
 {json.dumps(candidates, indent=1)}
 
 Pick UP TO {top_n} accounts - only genuinely strong ones. Returning 1 is better than including a weak one.
 Returning none is fine.
 Rules:
 - Only pick accounts that match our target accounts and SDR motion. Never pick our direct competitors.
+- Never pick obvious accounts: market leaders, household names, big or well-known companies in the space.
+  Our sales leader already knows them - they're probably already customers, already being targeted, or have
+  already said no - so suggesting them shows no research. If the evidence or the name suggests a large or
+  well-known company, skip it, even when "employees" is null.
+- Prefer lesser-known, fast-moving companies that fit our target accounts and have a fresh, specific trigger -
+  the kind a sales leader hasn't spotted yet.
 - The evidence must clearly be about THIS company (at its url), not a similarly named one. If in doubt, skip it.
 - The evidence must show one of OUR trigger types happening recently. Revenue targets, loans, generic funding,
   awards and generic company news do NOT count.
@@ -407,6 +593,7 @@ Rules:
   Good: "Is the Newcastle sales team selling the same product as London, or a cut-down version for smaller firms?"
   Never start with "I noticed", "I heard" or "I saw". No compliments, no "congrats", no buzzwords.
 - Never use these words anywhere in why_now or opening_line: {', '.join(BANNED_PHRASES)}.
+- Never use guessing words in why_now: {', '.join(WHY_NOW_GUESSING)}. State only what the evidence shows.
 - Never use these in opening_line: {', '.join(OPENER_BANNED)}.
 - "strength" = REQUIRED on every account: a JSON integer from 1 to 5, not a string
   (5 = clear fit + fresh, specific trigger directly tied to the problem; 4 = good; 3 or below = weak).
@@ -419,10 +606,12 @@ Return JSON in exactly this shape (values are examples):
 
     # evidence_by_account = {account url: {evidence url: snippet}}
     #   - lets us check each account only against its OWN sources
-    # dates = {evidence url: date}
+    # dates = {evidence url: date}, employees_by_url = {account url: headcount or None}
     evidence_by_account = {}
     dates = {}
+    employees_by_url = {}
     for candidate in candidates:
+        employees_by_url[candidate["url"]] = candidate.get("employees")
         snippets_by_url = {}
         for evidence in candidate["evidence"]:
             snippets_by_url[evidence["url"]] = evidence["snippet"]
@@ -440,13 +629,22 @@ Return JSON in exactly this shape (values are examples):
                 shown_raw = True
             continue
         account["evidence_date"] = dates.get(account["evidence_url"], "")
+
+        # Headcount comes from Exa's data (via the candidate), never from the model's answer
+        account["employees"] = employees_by_url.get(account["url"])
+        if account["employees"] is not None and account["employees"] > MAX_ACCOUNT_EMPLOYEES:
+            print(f"Dropped {account.get('name')}: {account['employees']:,} employees is over the "
+                  f"{MAX_ACCOUNT_EMPLOYEES:,} limit")
+            continue
+
         # The model sometimes invents a persona (e.g. the job being hired). Fall back to our top buyer title.
         if account.get("persona") not in icp["buyer_titles"]:
             account["persona"] = icp["buyer_titles"][0]
         verified.append(account)
 
     verified = verified[:top_n]
-    for account in verified:                                   # only judge accounts we're keeping
+    for account in verified:                                   # only polish accounts we're keeping
+        fix_why_now(account)
         finalise_opener(account, icp)
     return verified
 
@@ -475,22 +673,21 @@ def find_buyer(account_url, buyer_titles, fallback_titles):
     payload = {
         "company_linkedin_url": company_linkedin,
         "cascade": [exact_titles, broader_titles, founders],
-        "max_results": 1,
+        "max_results": 3,                  # a few spares, in case the best match has left the company
     }
     response = requests.post(f"{BLITZ_URL}/v2/search/waterfall-icp-keyword",
                              headers=BLITZ_HEADERS, json=payload, timeout=60)
     response.raise_for_status()
 
-    results = response.json().get("results", [])
-    if not results:
-        return None
-    person = results[0]["person"]
-
-    # Their current job title is the first entry in their work history
-    title = ""
-    if person.get("experiences"):
-        title = person["experiences"][0]["job_title"]
-    return {"name": person.get("full_name"), "title": title, "linkedin": person.get("linkedin_url")}
+    # Results come best match first: take the first person who still works there
+    for result in response.json().get("results", []):
+        person = result["person"]
+        title = current_job_title(person, company_linkedin, account_url)
+        if title is None:
+            print(f"  Skipped {person.get('full_name')}: no current job at {account_url}")
+            continue
+        return {"name": person.get("full_name"), "title": title, "linkedin": person.get("linkedin_url")}
+    return None
 
 
 def clean_triggers(icp):
@@ -535,8 +732,20 @@ CALL_GUIDANCE = ("Be curious, ask questions, look for pain, explain how {company
 BUZZWORDS = ["data-driven", "optimiz", "optimis", "enhanc", "insights", "solution", "empower", "seamless",
              "cutting-edge", "innovative", "game-chang", "synergy", "robust", "unlock", "drive growth"]
 
+# Vague, generic or category words that make outreach sound like a template (subject, email AND call script).
+# "challenge" also catches "challenges"; "reevaluat" catches "reevaluate"/"reevaluating";
+# "often struggle" is the classic generic-pain line.
+OUTREACH_BANNED = ["challenge", "assist", "platform", "solution", "effectively", "directly", "may lead",
+                   "could lead", "reevaluat", "leverage", "often struggle"]
+
+# Extra words the subject line must never use
+SUBJECT_BANNED = ["challenge", "solution", "opportunit"]
+
 # The email may open with "I noticed", so that one phrase is allowed there
-EMAIL_BANNED = [phrase for phrase in BANNED_PHRASES if phrase != "i noticed"] + BUZZWORDS
+EMAIL_BANNED = [phrase for phrase in BANNED_PHRASES if phrase != "i noticed"] + BUZZWORDS + OUTREACH_BANNED
+
+# The call script uses the full list
+CALL_BANNED = BANNED_PHRASES + BUZZWORDS + OUTREACH_BANNED
 
 
 def pick_best_account(accounts):
@@ -587,12 +796,28 @@ def clean_email_body(text):
     return body
 
 
+def copies_quote(paragraph, quote, run_length=8):
+    """True if the paragraph contains any run of 8 words in a row copied from the quote.
+    Punctuation and capitals are ignored, so "Acme, Inc. has said" still matches "acme inc has said"."""
+    quote_words = re.findall(r"[a-z0-9£$€%]+", (quote or "").lower())
+    paragraph_words = re.findall(r"[a-z0-9£$€%]+", (paragraph or "").lower())
+    paragraph_text = " " + " ".join(paragraph_words) + " "
+    for start in range(len(quote_words) - run_length + 1):
+        run = " ".join(quote_words[start:start + run_length])
+        if f" {run} " in paragraph_text:
+            return True
+    return False
+
+
 def check_outreach(draft, account):
     """Return a list of rule failures (empty = all good)."""
     problems = []
     subject = (draft.get("subject") or "").strip()
-    if not subject or len(subject.split()) > 4:
-        problems.append("subject must be 1-4 words")
+    if not 2 <= len(subject.split()) <= 4:
+        problems.append("subject must be 2-4 words")
+    subject_banned = [phrase for phrase in SUBJECT_BANNED + OUTREACH_BANNED if phrase in subject.lower()]
+    if subject_banned:
+        problems.append(f"subject uses banned word(s): {', '.join(sorted(set(subject_banned)))}")
 
     paragraphs = clean_email_body(draft.get("email"))
     if not paragraphs or len(paragraphs) > 4:
@@ -609,6 +834,9 @@ def check_outreach(draft, account):
         shared_words = trigger_words & first_paragraph_words
         if not shared_words:
             problems.append("first paragraph must mention the trigger")
+        # ...but in its own words: pasting the evidence quote reads like a press release
+        if copies_quote(paragraphs[0], account.get("evidence_quote")):
+            problems.append("first paragraph copies the evidence quote - say the trigger in your own plain words")
 
     # Banned phrases: the email has its own list ("I noticed" is allowed there), the call script uses the full list
     email_text = " ".join(paragraphs).lower()
@@ -617,7 +845,7 @@ def check_outreach(draft, account):
     for phrase in EMAIL_BANNED:
         if phrase in email_text:
             found.append(phrase)
-    for phrase in BANNED_PHRASES + BUZZWORDS:
+    for phrase in CALL_BANNED:
         if phrase in call_text:
             found.append(phrase)
     if found:
@@ -658,43 +886,75 @@ Why now: {account.get('why_now')}
 Person: {buyer_line}
 {fix}
 Return JSON with exactly these keys:
-"subject": 2-4 words, all lowercase, naming the concrete pain (e.g. "new store attribution", "reps chasing contact data").
-   No punctuation.
+"subject": 2-4 words, all lowercase, naming the specific consequence from paragraph 2
+   (e.g. "licences after the cuts", "berlin reps without data"). No punctuation.
+   Never "challenges", "solutions" or "opportunities".
 "email": ONLY the body - no greeting, no sign-off. Paragraphs separated by a blank line.
    Max 4 paragraphs, max 2 sentences each, in this order:
-   1. The observed trigger, stated plainly (may start "I noticed").
-   2. The relevant pain and its impact, phrased as what you see teams like theirs struggle with.
-   3. How {company_name} solves that pain.
+   1. The trigger in plain words, the way you'd say it to a colleague (e.g. "Saw Acme is cutting around
+      100 roles this year."). May start "I noticed". Keep names, places and products exactly as in the
+      evidence, but NEVER paste or closely copy the evidence quote - say it in your own words.
+   2. The SPECIFIC consequence of THIS trigger for the thing {company_name} solves - what actually goes wrong
+      for this account because of it (e.g. job cuts -> software licences still billing for people who've left).
+      No generic pain: never "teams like yours often struggle with...", never a vague benefit.
+   3. The outcome {company_name} delivers for that consequence, in one sentence. Never describe {company_name}
+      as a category ("an AI X platform", "a solution", "a tool that...").
    4. The call to action, as a question.
-   The pain must be concrete - what actually goes wrong for this account because of the trigger
-   (e.g. "not knowing which ads drove the new store's first sales"), not a vague benefit.
    No buzzwords ({', '.join(BUZZWORDS)}), no "congrats", no compliments.
-   Name the trigger with the evidence quote's own words for names, places and products - never reword them.
-"call_reason": 2 sentences said on a cold call: state the trigger exactly, then the issue it could create and
-   the consequence. Never say "I saw", "I noticed" or "I heard" - say where you looked, e.g.
+   Never use these words anywhere: {', '.join(OUTREACH_BANNED)}.
+"call_reason": 2 sentences said on a cold call: the trigger in your own plain words, then the specific
+   consequence it creates for this account (same rules as paragraph 2 - no generic pain, no banned words).
+   Never say "I saw", "I noticed" or "I heard" - say where you looked, e.g.
    "I was looking through your LinkedIn and saw...".
-"call_question": one question starting "How are you currently" about that specific pain.
+"call_question": one question starting "How are you currently" about that specific consequence.
 
 Style example email (another company, for tone only):
 I noticed Bolt for Business is hiring a Lead GTM Engineer to automate manual sales tasks and improve lead data.
 
-We speak with B2B sales teams who find that reaching the right buyers across markets can take too much research, leaving less time for conversations.
+Whatever that engineer automates will only be as good as the contact data underneath it - if the numbers and emails are patchy, the new workflows just send reps to dead ends faster.
 
-At Cognism we help sales teams get accurate contact data and automate manual sales processes to give reps more time on the phones which leads to increased pipeline.
+At Cognism we give reps accurate phone numbers and emails for the buyers they're targeting, so the time saved turns into more conversations and more pipeline.
 
 Would it be worth exploring whether we could help your reps spend less time finding contact details and more time speaking to buyers?
 
-Style example call_reason: "I was looking through your company's annual report and saw you estimate around £14.3m could be required to bring the portfolio to EPC B or better. When there's that level of improvement spend across multiple buildings, we often see the challenge become knowing which assets should receive investment first."
-Style example call_question: "How are you currently deciding which properties should be prioritised?\""""
-    draft = ask_openai_for_json(prompt)
+Style example call_reason: "I was looking through your company's annual report and saw you estimate around £14.3m could be required to bring the portfolio to EPC B or better. With that level of improvement spend across multiple buildings, the hard part becomes knowing which assets should receive investment first."
+Style example call_question: "How are you currently deciding which properties should be prioritised?"
+
+Return JSON in exactly this shape, with all four keys filled in:
+{{"subject": "...", "email": "...", "call_reason": "...", "call_question": "..."}}"""
+    draft = read_draft(ask_openai_for_json(prompt))
     # Tidy the subject in code: no surrounding spaces or full stops, all lowercase
     draft["subject"] = (draft.get("subject") or "").strip().strip(".").lower()
     return draft
 
 
+def read_draft(raw):
+    """Pull the four outreach fields out of the model's JSON, whatever shape it used.
+    (call_reason once came back empty because the model nested it as {"call": {"reason": ...}}
+    or renamed it - this accepts those variants, so the call script is never lost.)"""
+    call = raw.get("call") if isinstance(raw.get("call"), dict) else {}
+    call_script = raw.get("call_script") if isinstance(raw.get("call_script"), dict) else {}
+
+    def first_text(*values):
+        for value in values:
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    return {
+        "subject": first_text(raw.get("subject")),
+        "email": first_text(raw.get("email"), raw.get("email_body"), raw.get("body")),
+        "call_reason": first_text(raw.get("call_reason"), raw.get("reason"), raw.get("callReason"),
+                                  call.get("reason"), call.get("call_reason"), call_script.get("reason")),
+        "call_question": first_text(raw.get("call_question"), raw.get("question"), raw.get("callQuestion"),
+                                    call.get("question"), call.get("call_question"), call_script.get("question")),
+    }
+
+
 def write_outreach(company_name, icp, accounts):
     """Email + cold call script for the strongest account only. Regenerates once if a rule fails.
-    Returns None (and nothing is shown) if it still fails."""
+    If both drafts break rules, the better one is KEPT with a "review before sending" note -
+    style rules never leave the plan without outreach."""
     account = pick_best_account(accounts)
     if not account:
         return None
@@ -702,11 +962,13 @@ def write_outreach(company_name, icp, accounts):
     problems = check_outreach(draft, account)
     if problems:
         print(f"Outreach draft 1 failed: {problems} - regenerating once")
-        draft = generate_outreach(company_name, icp, account, feedback=problems)
-        problems = check_outreach(draft, account)
+        second_draft = generate_outreach(company_name, icp, account, feedback=problems)
+        second_problems = check_outreach(second_draft, account)
+        # Keep the draft with fewer broken rules (the second one on a tie - it had the feedback)
+        if len(second_problems) <= len(problems):
+            draft, problems = second_draft, second_problems
         if problems:
-            print(f"Outreach draft 2 failed: {problems} - no outreach saved")
-            return None
+            print(f"Outreach draft 2 failed: {second_problems} - keeping the best draft with a review note")
 
     # If Blitz found no one, leave a placeholder for me to fill in by hand
     name = first_name(account.get("buyer"))
@@ -714,7 +976,8 @@ def write_outreach(company_name, icp, accounts):
     call_name = name or "{Name}"
 
     # Greeting and sign-off are added here so they're always exactly right
-    email_parts = [f"Hi {email_name}"] + clean_email_body(draft["email"]) + ["Best,\nJosh"]
+    # The sign-off has no name: the plan page adds the user's own name under it
+    email_parts = [f"Hi {email_name}"] + clean_email_body(draft["email"]) + ["Best,"]
     email = "\n\n".join(email_parts)                          # a blank line between each part
 
     return {
@@ -724,10 +987,11 @@ def write_outreach(company_name, icp, accounts):
         "email": email,
         "call": {
             "opener": CALL_OPENER.format(name=call_name),
-            "reason": draft["call_reason"].strip(),
-            "question": draft["call_question"].strip(),
+            "reason": draft["call_reason"],
+            "question": draft["call_question"],
             "guidance": CALL_GUIDANCE.format(company=company_name),
         },
+        "review_notes": problems,              # rules the kept draft still breaks (empty = all good)
     }
 
 
@@ -742,6 +1006,14 @@ def build_pack(company_name, website, territory):
     icp = build_icp(company_name, website_text, job_description, territory)
     clean_triggers(icp)
 
+    # Size: the model picked a segment; code turns it into fixed employee numbers
+    segment = read_segment(icp)
+    icp["segment"] = segment
+    icp["segment_label"] = describe_segment(segment)               # shown on the plan page
+    lowest, highest = allowed_employee_range(segment)
+    print(f"Account size: {icp['segment_label']} -> allowed {lowest:,}-{highest:,} "
+          f"(+/-{int(SIZE_TOLERANCE * 100)}%, backstop {MAX_ACCOUNT_EMPLOYEES:,})")
+
     # Never prospect the employer or companies its job ad names (e.g. Everfield's portfolio company Depotnet)
     excluded = set()
     for name in [company_name] + icp.get("companies_in_job_ad", []):
@@ -753,6 +1025,9 @@ def build_pack(company_name, website, territory):
     for candidate in find_candidates(icp["exa_queries"], domain):
         if is_excluded(candidate, excluded):
             print(f"Excluded {candidate['name']}: named in the job ad")
+        elif not is_right_size(candidate, lowest, highest):
+            print(f"Dropped {candidate['name']}: {candidate['employees']:,} employees "
+                  f"(allowed {lowest:,}-{highest:,})")
         else:
             candidates.append(candidate)
     candidates = candidates[:15]                                       # cap at 15 to control cost
@@ -792,7 +1067,7 @@ def build_pack(company_name, website, territory):
 
 def create_packs_table():
     """prospect_packs = one saved plan per company (plus my hand edits, if any)."""
-    connection = sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.execute("""
         CREATE TABLE IF NOT EXISTS prospect_packs (
             company_name TEXT UNIQUE,
@@ -809,9 +1084,18 @@ def create_packs_table():
     connection.close()
 
 
+def has_saved_pack(company_name):
+    """True if a plan is already saved for this company (so showing it is free)."""
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
+    row = connection.execute(
+        "SELECT 1 FROM prospect_packs WHERE company_name = ?", (company_name,)).fetchone()
+    connection.close()
+    return row is not None
+
+
 def get_edited_html(company_name):
     """The hand-edited version of the plan, or None if it hasn't been edited."""
-    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     row = connection.execute(
         "SELECT edited_html FROM prospect_packs WHERE company_name = ?", (company_name,)).fetchone()
     connection.close()
@@ -822,7 +1106,7 @@ def get_edited_html(company_name):
 
 def save_edited_html(company_name, html):
     """Save my hand-edited version of a company's plan."""
-    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     connection.execute(
         "UPDATE prospect_packs SET edited_html = ? WHERE company_name = ?", (html, company_name))
     connection.commit()
@@ -832,7 +1116,7 @@ def save_edited_html(company_name, html):
 def get_pack(company_name, website, territory, refresh=False):
     """Cache first. Build only if we don't have one (or refresh=True). Errors raise, nothing saved."""
     if not refresh:
-        connection = sqlite3.connect(DATABASE, timeout=30)
+        connection = sqlite3.connect(DATABASE_PATH, timeout=30)
         row = connection.execute(
             "SELECT pack_json FROM prospect_packs WHERE company_name = ?", (company_name,)).fetchone()
         connection.close()
@@ -846,7 +1130,7 @@ def get_pack(company_name, website, territory, refresh=False):
     pack = build_pack(company_name, website, territory)
 
     # INSERT OR REPLACE swaps in a brand-new row, so any edited_html is cleared - only once the rebuild succeeded
-    connection = sqlite3.connect(DATABASE, timeout=30)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
     connection.execute(
         "INSERT OR REPLACE INTO prospect_packs (company_name, pack_json, created_at) VALUES (?, ?, ?)",
         (company_name, json.dumps(pack), date.today().isoformat()))
