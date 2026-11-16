@@ -87,7 +87,8 @@ BLITZAPI_KEY=...
 APP_USERNAME=...              # login for the whole site (the app won't start without both)
 APP_PASSWORD=...
 # Optional: DATABASE_PATH (default landly.db), MAX_PLANS_PER_DAY (default 10),
-# MAX_CONTACT_LOOKUPS_PER_DAY (default 20), ENABLE_SCHEDULER=true (daily job refresh inside the app)
+# MAX_CONTACT_LOOKUPS_PER_DAY (default 20), ENABLE_SCHEDULER=true (daily job refresh inside the app),
+# BACKFILL_DAYS=30 (one-off: the next job load fetches the last 30 days, then back to normal)
 ```
 
 ```bash

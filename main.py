@@ -139,6 +139,12 @@ def get_jobs(city=None, days=None, applied=None):
     return [dict(row) for row in rows]
 
 
+@app.get("/")
+def home():
+    """The site root just sends you to the job list."""
+    return RedirectResponse("/jobs")
+
+
 @app.get("/jobs")
 def show_jobs(request: Request, city: str = None, days: str = None, applied: str = None):
     """The job list, e.g. /jobs?city=London&days=7&applied=no"""

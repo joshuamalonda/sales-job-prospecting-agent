@@ -3,7 +3,7 @@ import os
 import sqlite3
 from datetime import date
 
-from fetch_jobs import fetch_and_save
+from fetch_jobs import NORMAL_DAYS_BACK, fetch_and_save
 from settings import DATABASE_PATH
 
 # Fetch fresh jobs from the API only if FETCH_FROM_API=true is set when running (my laptop's cron sets it,
@@ -205,11 +205,12 @@ def count_jobs_in_database():
     return result[0]
 
 
-def run(fetch_from_api=FETCH_FROM_API):
-    """The whole daily job load: fetch (optional) -> clean -> filter -> save to the database."""
+def run(fetch_from_api=FETCH_FROM_API, days_back=NORMAL_DAYS_BACK):
+    """The whole daily job load: fetch (optional) -> clean -> filter -> save to the database.
+    days_back = how far back to fetch postings (2 normally, more for a one-off backfill)."""
     # When fetch_from_api is True, call the API and save fresh jobs to jobs_all.json (a function from fetch_jobs.py)
     if fetch_from_api:
-        fetch_and_save()
+        fetch_and_save(days_back)
     # Load all the jobs from the json file in Python code then print the total amount of jobs
     raw_jobs = load_jobs("jobs_all.json")
     print(len(raw_jobs))

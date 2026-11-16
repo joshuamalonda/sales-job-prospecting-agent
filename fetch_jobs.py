@@ -14,6 +14,9 @@ headers = {"x-rapidapi-key": api_key,
 
 url = "https://ats-jobs-db.p.rapidapi.com/api/jobs"
 
+NORMAL_DAYS_BACK = 2         # the normal daily fetch: postings from the last 2 days
+MAX_PAGES_PER_SEARCH = 5     # safety cap: never more than 5 requests (500 jobs) per search, even on a backfill
+
 
 # Fetches every page of results for one search, and returns all the jobs in one list, the params allows us to get the data we need from the API
 def fetch_all_pages(search_term, days_back): # Search term could be SDR or BDR
@@ -31,19 +34,31 @@ def fetch_all_pages(search_term, days_back): # Search term could be SDR or BDR
     }
 
     all_jobs = []
+    page = 1
+    total_pages = 1
 
-    # If successful, add its jobs to all_jobs
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code != 200:
-        print(response.status_code, response.text)
-        return all_jobs
-    data = response.json()
-    all_jobs.extend(data["jobs"])
+    # Each page is one API request (100 jobs). The first answer says how many pages there are.
+    while page <= total_pages and page <= MAX_PAGES_PER_SEARCH:
+        params["page"] = str(page)
+        response = requests.get(url, headers=headers, params=params, timeout=60)
+        if response.status_code != 200:
+            # Raise instead of returning half the jobs, so a failed fetch is never counted as a successful run
+            raise RuntimeError(f"Jobs API failed on page {page} of '{search_term}': "
+                               f"{response.status_code} {response.text[:200]}")
+        data = response.json()
+        all_jobs.extend(data["jobs"])
+        total_pages = data.get("total_pages") or 1
+        print(f"'{search_term}': page {page} of {total_pages} ({data.get('total')} jobs in total)")
+        page += 1
+
+    if total_pages > MAX_PAGES_PER_SEARCH:
+        print(f"Stopped at {MAX_PAGES_PER_SEARCH} pages for '{search_term}' (safety cap) - "
+              f"{total_pages - MAX_PAGES_PER_SEARCH} page(s) not fetched")
     return all_jobs
 
 
 # Fetches SDR and BDR jobs from the API and caches them in jobs_all.json
-def fetch_and_save(days_back=2):
+def fetch_and_save(days_back=NORMAL_DAYS_BACK):
     sdr_jobs = fetch_all_pages("Sales Development Representative", days_back)
     bdr_jobs = fetch_all_pages("Business Development Representative", days_back)
     combined_jobs = sdr_jobs + bdr_jobs
