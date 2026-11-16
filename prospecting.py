@@ -192,8 +192,11 @@ Return JSON with exactly these keys:
 "problem": in one sentence, the specific situation on the PROSPECT's side that makes them say yes to the
    SDR's ask (from the prospect's point of view, e.g. "A founder wants to step back or cash out but doesn't
    want a buyer who will gut the product"). Don't name {company_name},
-"target_customers": a SPECIFIC description of the companies the SDRs contact: business model, size band
-   (employees or revenue), ownership/stage and tech if relevant. Use the job ad's segment and region.
+"target_customers": a SPECIFIC description of the companies the SDRs contact. It MUST name their business
+   model (e.g. DTC ecommerce brand, B2B SaaS company, retail bank, insurer, founder-owned software business) and,
+   where relevant, the platform or channel they sell or run on (e.g. "DTC ecommerce brands selling on Shopify",
+   "mid-sized insurers using legacy policy systems"). Then size band, ownership/stage and tech if relevant.
+   A size band on its own is NOT enough. Use the job ad's segment and region.
    Never "all sizes", "any industry", "globally" or "businesses of all kinds",
 "trigger_types": 3-5 PUBLICLY OBSERVABLE events that make the prospect ready for the SDR's ask right now,
    each under 12 words. Each must be findable in a news search, press release, job board, Companies House
@@ -207,7 +210,8 @@ Return JSON with exactly these keys:
 "segment": exactly one of "smb", "mid-market", "enterprise", "mixed" - the size of the companies the SDRs
    contact (the PROSPECTS, not {company_name} itself). Decide from the job ad first (words like SMB, mid-market,
    enterprise, strategic accounts, named accounts), then the website (customer logos, case studies, pricing).
-   smb = 1-200 employees, mid-market = 200-2,000, enterprise = 2,000+, mixed = clearly sells across sizes,
+   smb = 1-200 employees, mid-market = 200-2,000, enterprise = 2,000+, mixed = clearly sells across sizes.
+   Pick what the evidence shows - don't default to mid-market. If neither source says, use "mixed",
 "exa_queries": 3 search queries describing the companies the SDRs contact, headquartered or operating in
    {territory}, by facts (business model, size, ownership, location, technology). Include the segment's size
    band (number of employees) in each query. Never {company_name}'s competitors. No company names, no vague words.
@@ -383,6 +387,64 @@ def check_account(account, evidence_by_account):
     return None
 
 
+# The four fact questions verify_claim asks, and how each failure is described
+CLAIM_CHECKS = {
+    "about_this_company": "(a) the event isn't done by this company",
+    "timing_agrees": "(b) the timing contradicts the evidence",
+    "facts_in_evidence": "(c) the claim states something the evidence doesn't",
+    "is_possible_customer": "(d) not a possible customer (vendor, agency or competitor)",
+}
+
+
+def verify_claim(company_name, icp, account, claim_text, evidence):
+    """FACT check, one gpt-4o-mini call (temperature 0). Does the evidence really support this claim
+    about this account, and is the account a possible CUSTOMER of company_name?
+    The model answers four separate true/false questions; CODE decides (all four must be true) -
+    one combined yes/no from the model proved unreliable.
+    claim_text = the trigger + why_now, or an email paragraph / call reason.
+    evidence = {"title", "url", "date", "snippet"}.
+    Returns {"supported": bool, "failed": [check names], "problem": str}."""
+    name = account.get("name")
+    prompt = f"""You are a careful fact-checker for a sales prospecting plan written for {company_name}.
+{company_name}: {icp.get('summary', '')}
+{company_name}'s target customers: {icp.get('target_customers', '')}
+
+Account: {name} ({account.get('url')})
+Claim about the account:
+{claim_text}
+
+The ONLY evidence:
+Title: {evidence.get('title') or ''}
+Published: {evidence.get('date') or 'unknown'}
+Text: {evidence.get('snippet') or ''}
+
+Answer each question separately, true or false, strictly from the evidence:
+"about_this_company": is the event in the claim done by {name} itself, or by {name} together with a partner
+   it is named alongside? False if the article is really about ANOTHER company's news (a partner's, a brand it
+   stocks, a customer's, a competitor's, its parent's) and {name} is only mentioned in passing.
+"timing_agrees": does the claim's timing agree with the evidence? False ONLY for a real contradiction:
+   a different month or year, or a planned/future event (e.g. "in 2027", "will open") written as already
+   happened. Less precise is NOT a contradiction: "in October" agrees with "October 5, 2026", and a claim
+   with no year or no date agrees with a dated article.
+"facts_in_evidence": is every name, place, number and event the claim states as fact found in the evidence?
+   (Opinions about what it means for the business don't count as facts.)
+"is_possible_customer": could {name} buy from {company_name} - is it one of its target customers? False if
+   {name} is a software vendor, agency, consultancy or tool that sells to those same customers, or a
+   competitor of {company_name}.
+Return JSON: {{"about_this_company": true/false, "timing_agrees": true/false, "facts_in_evidence": true/false,
+"is_possible_customer": true/false, "problem": "empty if all true, otherwise one short sentence explaining the false one(s)"}}"""
+    verdict = ask_openai_for_json(prompt)
+    failed = []
+    for check in CLAIM_CHECKS:
+        if verdict.get(check) is not True:                   # only a real true counts; missing = failed
+            failed.append(check)
+    problem = str(verdict.get("problem") or "").strip()
+    if failed:
+        labels = "; ".join(CLAIM_CHECKS[check] for check in failed)
+        problem = f"{labels} - {problem}" if problem else labels
+    return {"supported": not failed, "failed": failed, "problem": problem}
+
+
 def why_now_problems(why_now):
     """Banned or guessing words in a why_now (empty list = fine)."""
     problems = [phrase for phrase in BANNED_PHRASES if phrase in (why_now or "").lower()]
@@ -431,6 +493,16 @@ def fix_why_now(account):
 def add_review_note(item, note):
     """A visible 'review before sending' note on an account or the outreach (shown on screen, hidden in print)."""
     item.setdefault("review_notes", []).append(note)
+
+
+def evidence_for(account):
+    """The account's evidence in the shape verify_claim expects."""
+    return {
+        "title": account.get("evidence_title"),
+        "url": account.get("evidence_url"),
+        "date": account.get("evidence_date"),
+        "snippet": account.get("evidence_snippet"),
+    }
 
 
 def guessing_words_in(text):
@@ -546,7 +618,7 @@ def judge_and_check(account, icp, line, attempt):
             "reason": reason, "rewrite": verdict["rewrite"]}
 
 
-def rank_accounts(icp, candidates, top_n=3):
+def rank_accounts(icp, candidates, top_n=3, company_name=""):
     """Step 4: up to 3 STRONG accounts, each claim backed by an exact quote from real evidence."""
     # Nothing to judge without evidence
     candidates = [candidate for candidate in candidates if candidate["evidence"]]
@@ -610,8 +682,11 @@ Return JSON in exactly this shape (values are examples):
     evidence_by_account = {}
     dates = {}
     employees_by_url = {}
+    evidence_items = {}                                   # {evidence url: the whole evidence item}
     for candidate in candidates:
         employees_by_url[candidate["url"]] = candidate.get("employees")
+        for item in candidate["evidence"]:
+            evidence_items[item["url"]] = item
         snippets_by_url = {}
         for evidence in candidate["evidence"]:
             snippets_by_url[evidence["url"]] = evidence["snippet"]
@@ -637,10 +712,24 @@ Return JSON in exactly this shape (values are examples):
                   f"{MAX_ACCOUNT_EMPLOYEES:,} limit")
             continue
 
+        # Keep the source text on the account, so the claim (and later the email) can be checked against it
+        evidence = evidence_items.get(account["evidence_url"], {})
+        account["evidence_title"] = evidence.get("title") or ""
+        account["evidence_snippet"] = evidence.get("snippet") or ""
+
+        # Facts: is the trigger really about THIS company, with the right timing, and is it a customer?
+        claim = f"Trigger: {account.get('trigger')}\nWhy now: {account.get('why_now')}"
+        claim_check = verify_claim(company_name, icp, account, claim, evidence_for(account))
+        if not claim_check["supported"]:
+            print(f"Dropped {account.get('name')}: claim check - {claim_check['problem']}")
+            continue
+
         # The model sometimes invents a persona (e.g. the job being hired). Fall back to our top buyer title.
         if account.get("persona") not in icp["buyer_titles"]:
             account["persona"] = icp["buyer_titles"][0]
         verified.append(account)
+        if len(verified) == top_n:                         # stop paying for checks once we have enough
+            break
 
     verified = verified[:top_n]
     for account in verified:                                   # only polish accounts we're keeping
@@ -690,18 +779,53 @@ def find_buyer(account_url, buyer_titles, fallback_titles):
     return None
 
 
-def clean_triggers(icp):
-    """Remove trigger types that aren't publicly observable events (the prompt asks, this enforces)."""
+MIN_TRIGGERS = 3
+MAX_TRIGGERS = 5
+
+
+def filter_triggers(triggers):
+    """Keep only trigger types that are publicly observable events (the prompt asks, this enforces)."""
     kept = []
-    for trigger in icp.get("trigger_types", []):
+    for trigger in triggers or []:
+        if not isinstance(trigger, str) or not trigger.strip():
+            continue
         bad = [phrase for phrase in TRIGGER_BANNED if phrase in trigger.lower()]
         if bad:
             print(f"Removed trigger '{trigger}': {', '.join(bad)}")
         else:
-            kept.append(trigger)
+            kept.append(trigger.strip())
+    return kept
+
+
+def clean_triggers(icp, company_name=""):
+    """Filter the trigger types. If fewer than 3 survive, ask for new ones ONCE (instead of shipping 2),
+    and keep the unique good ones from both rounds, up to 5."""
+    kept = filter_triggers(icp.get("trigger_types"))
+    if len(kept) < MIN_TRIGGERS:
+        print(f"Only {len(kept)} trigger type(s) left - asking for more once")
+        for trigger in filter_triggers(regenerate_triggers(company_name, icp, kept)):
+            if trigger.lower() not in [existing.lower() for existing in kept]:
+                kept.append(trigger)
     if not kept:
         raise ValueError("No usable trigger types after filtering")
-    icp["trigger_types"] = kept
+    if len(kept) < MIN_TRIGGERS:
+        print(f"Warning: still only {len(kept)} trigger type(s) after regenerating")
+    icp["trigger_types"] = kept[:MAX_TRIGGERS]
+
+
+def regenerate_triggers(company_name, icp, already_have):
+    """One gpt-4o-mini call for fresh trigger types, avoiding the banned kinds."""
+    prompt = f"""{company_name}'s SDRs: {icp.get('sdr_motion', '')}
+The prospect's situation that makes them say yes: {icp.get('problem', '')}
+Target customers: {icp.get('target_customers', '')}
+Trigger types we already have: {already_have}
+
+Write 4 MORE trigger types: PUBLICLY OBSERVABLE events that make one of these prospects ready for the SDR's
+ask right now, each under 12 words, each findable in a news search, press release, job board, Companies House
+filing or LinkedIn post, and connected directly to the situation above. Different from the ones we have.
+Never vague states or these words: {', '.join(TRIGGER_BANNED)}.
+Return JSON: {{"trigger_types": ["...", "..."]}}"""
+    return ask_openai_for_json(prompt).get("trigger_types") or []
 
 
 def is_excluded(candidate, excluded_names):
@@ -951,10 +1075,26 @@ def read_draft(raw):
     }
 
 
+def outreach_fact_problem(company_name, icp, account, draft):
+    """Check the email's first paragraph (the trigger) and the call reason against the evidence.
+    Returns None if they're supported, otherwise the problem."""
+    paragraphs = clean_email_body(draft.get("email"))
+    first_paragraph = paragraphs[0] if paragraphs else ""
+    claim = f"Email: {first_paragraph}\nCall: {draft.get('call_reason', '')}"
+    check = verify_claim(company_name, icp, account, claim, evidence_for(account))
+    # Whether the account is a customer was settled when it was chosen - here only the FACTS in the text count
+    fact_failures = [failed for failed in check["failed"] if failed != "is_possible_customer"]
+    if not fact_failures:
+        return None
+    return check["problem"] or "not supported by the evidence"
+
+
 def write_outreach(company_name, icp, accounts):
-    """Email + cold call script for the strongest account only. Regenerates once if a rule fails.
-    If both drafts break rules, the better one is KEPT with a "review before sending" note -
-    style rules never leave the plan without outreach."""
+    """Email + cold call script for the strongest account only.
+    - STYLE rules: regenerate once; if both drafts break rules, the better one is KEPT with a
+      "review before sending" note (style never leaves the plan without outreach).
+    - FACTS: the email's first paragraph and the call reason are checked against the evidence.
+      If they contradict it: regenerate once; if still wrong, NO outreach (facts are never a review note)."""
     account = pick_best_account(accounts)
     if not account:
         return None
@@ -969,6 +1109,18 @@ def write_outreach(company_name, icp, accounts):
             draft, problems = second_draft, second_problems
         if problems:
             print(f"Outreach draft 2 failed: {second_problems} - keeping the best draft with a review note")
+
+    # Facts: does what the email and call SAY about the account match the evidence?
+    fact_problem = outreach_fact_problem(company_name, icp, account, draft)
+    if fact_problem:
+        print(f"Outreach contradicts the evidence: {fact_problem} - regenerating once")
+        draft = generate_outreach(company_name, icp, account,
+                                  feedback=problems + [f"FACT ERROR - {fact_problem}. Only state what the evidence says"])
+        problems = check_outreach(draft, account)
+        fact_problem = outreach_fact_problem(company_name, icp, account, draft)
+        if fact_problem:
+            print(f"Outreach still contradicts the evidence: {fact_problem} - no outreach for {account.get('name')}")
+            return None
 
     # If Blitz found no one, leave a placeholder for me to fill in by hand
     name = first_name(account.get("buyer"))
@@ -1004,7 +1156,7 @@ def build_pack(company_name, website, territory):
     website_text = get_website_text(company_name, domain)
     job_description = get_job_description(company_name)
     icp = build_icp(company_name, website_text, job_description, territory)
-    clean_triggers(icp)
+    clean_triggers(icp, company_name)
 
     # Size: the model picked a segment; code turns it into fixed employee numbers
     segment = read_segment(icp)
@@ -1037,7 +1189,7 @@ def build_pack(company_name, website, territory):
         candidate["evidence"] = find_trigger_evidence(candidate, icp["trigger_types"])
 
     # Step 4: keep only the strong, verified accounts
-    accounts = rank_accounts(icp, candidates)
+    accounts = rank_accounts(icp, candidates, company_name=company_name)
 
     # Step 5: the person to contact at each account
     for account in accounts:

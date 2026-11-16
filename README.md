@@ -100,6 +100,16 @@ uvicorn main:app --reload     # open http://127.0.0.1:8000/jobs
 
 ---
 
+## Regression tests
+
+```bash
+python check_plans.py                   # free: replays saved real inputs, checks every rule
+python check_plans.py --refresh-openai  # ~1p per company: only after a prompt change
+python check_plans.py --record Vertice  # paid (~$0.20 Exa): record fresh real inputs
+```
+
+`tests/golden_plans/` holds the saved inputs for Triple Whale, Vertice, PlainID and Everfield (website text, job ad, Exa results, OpenAI answers) plus hand-written expectations: vendors and competitors that must never be accounts, business-model words the ICP must use, and claim-checker cases built from real false claims. Run it after every change.
+
 ## Known limitations
 
 - Contacts are filtered to people whose *current* job is at the company. Contacts saved before that filter existed aren't re-checked.
