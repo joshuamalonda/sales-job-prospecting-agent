@@ -19,7 +19,3 @@ MAX_CONTACT_LOOKUPS_PER_DAY = int(os.getenv("MAX_CONTACT_LOOKUPS_PER_DAY", "20")
 
 # Turn on the daily job refresh inside the web app (true on Railway, off on my laptop)
 ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER") == "true"
-
-# One-off backfill: e.g. BACKFILL_DAYS=30 makes the next job load fetch the last 30 days instead of the
-# normal 2. It runs once per value (remembered in the database), then the daily load goes back to normal.
-BACKFILL_DAYS = int(os.getenv("BACKFILL_DAYS") or 0)

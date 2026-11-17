@@ -1,10 +1,10 @@
 """Regression tests for the prospecting plan. Run after every change:
 
-    python check_plans.py                    FREE - replays saved inputs, no API calls at all
-    python check_plans.py --only Vertice     FREE - just one company
-    python check_plans.py --refresh-openai   ~1p per company - only needed when a prompt changed
+    python tests/check_plans.py                    FREE - replays saved inputs, no API calls at all
+    python tests/check_plans.py --only Vertice     FREE - just one company
+    python tests/check_plans.py --refresh-openai   ~1p per company - only needed when a prompt changed
                                              (re-asks OpenAI where the saved answer no longer matches)
-    python check_plans.py --record Vertice   PAID (~$0.20 Exa) - records fresh real inputs for one company
+    python tests/check_plans.py --record Vertice   PAID (~$0.20 Exa) - records fresh real inputs for one company
 
 How it works: tests/golden_plans/<company>.json holds everything a real run fetched - the website text,
 the job ad, Exa's company and news results, and OpenAI's answers. Replaying them runs the real pipeline
@@ -24,10 +24,14 @@ from pathlib import Path
 
 import requests
 
+# This file lives in tests/, so tell Python to also look one folder up for the app's own files
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
+
 import prospecting
 from settings import DATABASE_PATH
 
-GOLDEN_DIR = Path(__file__).parent / "tests" / "golden_plans"
+GOLDEN_DIR = Path(__file__).parent / "golden_plans"
 EXPECTATIONS_FILE = GOLDEN_DIR / "expectations.json"
 CLAIM_ANSWERS_FILE = GOLDEN_DIR / "claim_cases_openai.json"
 COMPANIES = ["Triple Whale", "Vertice", "PlainID", "Everfield"]
@@ -166,7 +170,7 @@ def restore_originals(originals):
 
 
 def no_paid_calls(*args, **kwargs):
-    raise RuntimeError("check_plans.py tried a real API call - every input should come from the saved file")
+    raise RuntimeError("tests/check_plans.py tried a real API call - every input should come from the saved file")
 
 
 def replay(company, refresh_openai=False):
@@ -411,13 +415,13 @@ def main():
 
     for company in companies:
         if not fixture_path(company).exists():
-            print(f"\n{company}: SKIP - no saved inputs (run: python check_plans.py --record \"{company}\")")
+            print(f"\n{company}: SKIP - no saved inputs (run: python tests/check_plans.py --record \"{company}\")")
             all_passed = False
             continue
         pack, log, missing = replay(company, args.refresh_openai)
         if missing:
             print(f"\n{company}: FAIL - {len(missing)} OpenAI answer(s) not recorded because a prompt changed.\n"
-                  f"    Run: python check_plans.py --refresh-openai   (about 1p per company)")
+                  f"    Run: python tests/check_plans.py --refresh-openai   (about 1p per company)")
             all_passed = False
             continue
         failures, warnings = check_pack(company, pack, expectations)

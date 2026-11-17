@@ -7,7 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import load_jobs
-from settings import BACKFILL_DAYS, DATABASE_PATH
+from settings import DATABASE_PATH
 
 JOB_NAME = "load_jobs"
 RUN_AFTER_HOUR = 8                       # 08:00 UK time
@@ -48,42 +48,11 @@ def save_success_date(day, job_name=JOB_NAME):
     connection.close()
 
 
-def backfill_job_name(days):
-    """e.g. "backfill_30" - one name per BACKFILL_DAYS value, so each value runs once."""
-    return f"backfill_{days}"
-
-
-def backfill_is_pending(days=None):
-    """True if BACKFILL_DAYS is set and that backfill hasn't succeeded yet."""
-    days = BACKFILL_DAYS if days is None else days
-    return days > 0 and get_last_success_date(backfill_job_name(days)) is None
-
-
-def run_backfill(today, days=None):
-    """The one-off backfill: fetch the last N days. Runs at the first check after startup, whatever the time.
-    On success it's recorded (so it never repeats) and also counts as today's normal load."""
-    days = BACKFILL_DAYS if days is None else days
-    print(f"Backfill starting: fetching postings from the last {days} days")
-    try:
-        load_jobs.run(fetch_from_api=True, days_back=days)
-    except Exception as error:
-        # Not recorded, so the next check (30 minutes later) tries the backfill again
-        print(f"Backfill failed: {error}")
-        return False
-    save_success_date(today, backfill_job_name(days))
-    save_success_date(today)
-    print("Backfill finished - daily loads are back to the normal window")
-    return True
-
-
 def run_if_due(now=None):
-    """Run the backfill if one is pending; otherwise run load_jobs if it's past 08:00 UK time and it
-    hasn't succeeded today. Returns True if something ran OK.
+    """Run load_jobs if it's past 08:00 UK time and it hasn't succeeded today. Returns True if it ran OK.
     The date is saved in the database, so restarts and redeploys never cause a second run on the same day."""
     now = now or datetime.now(UK_TIME)
     today = now.date().isoformat()
-    if backfill_is_pending():
-        return run_backfill(today)
     if now.hour < RUN_AFTER_HOUR or get_last_success_date() == today:
         return False
 

@@ -87,8 +87,7 @@ BLITZAPI_KEY=...
 APP_USERNAME=...              # login for the whole site (the app won't start without both)
 APP_PASSWORD=...
 # Optional: DATABASE_PATH (default landly.db), MAX_PLANS_PER_DAY (default 10),
-# MAX_CONTACT_LOOKUPS_PER_DAY (default 20), ENABLE_SCHEDULER=true (daily job refresh inside the app),
-# BACKFILL_DAYS=30 (one-off: the next job load fetches the last 30 days, then back to normal)
+# MAX_CONTACT_LOOKUPS_PER_DAY (default 20), ENABLE_SCHEDULER=true (daily job refresh inside the app)
 ```
 
 ```bash
@@ -103,19 +102,39 @@ uvicorn main:app --reload     # open http://127.0.0.1:8000/jobs
 ## Regression tests
 
 ```bash
-python check_plans.py                   # free: replays saved real inputs, checks every rule
-python check_plans.py --refresh-openai  # ~1p per company: only after a prompt change
-python check_plans.py --record Vertice  # paid (~$0.20 Exa): record fresh real inputs
+python tests/check_plans.py                   # free: replays saved real inputs, checks every rule
+python tests/check_plans.py --refresh-openai  # ~1p per company: only after a prompt change
+python tests/check_plans.py --record Vertice  # paid (~$0.20 Exa): record fresh real inputs
 ```
 
 `tests/golden_plans/` holds the saved inputs for Triple Whale, Vertice, PlainID and Everfield (website text, job ad, Exa results, OpenAI answers) plus hand-written expectations: vendors and competitors that must never be accounts, business-model words the ICP must use, and claim-checker cases built from real false claims. Run it after every change.
 
 ## Known limitations
 
-- Contacts are filtered to people whose *current* job is at the company. Contacts saved before that filter existed aren't re-checked.
-- Plans are only as good as recent public news. Some weeks, a company has no strong triggers.
-- Every plan should be read and edited before sending. It's a strong first draft, not a finished one.
-- Contact data is personal data. The deployed app is password-protected and has daily caps on paid lookups.
+- **Works best for companies with a focused ICP.** Businesses with a specific
+  customer (e.g. a DTC ecommerce brand, a bank, an HR team) produce strong,
+  relevant accounts. Broad, horizontal products that sell to companies of every
+  size (developer infrastructure, general platforms like Redis or GitLab) often
+  return few or no accounts, because the candidate pool is noisy and the tool
+  deliberately drops anything it can't verify.
+
+- **Truth over volume.** Every trigger is checked against its source, and
+  anything unverified is dropped. This means some plans return 1 account, or
+  none. That is by design — one account backed by real, recent evidence is more
+  useful than three with weak or invented claims.
+
+- **Always verify before sending.** Contact data comes from a third-party
+  provider and can be out of date, so the suggested person should be checked on
+  LinkedIn. Generated emails and call scripts are a strong first draft, not a
+  finished message.
+
+- **Built for people who already understand outbound.** Landly assumes the user
+  knows what a prospecting plan is and why they'd send one to a hiring manager.
+  People entirely new to sales may need that context explained first.
+
+- **Not multi-user yet.** Saved data (applied status, plan edits) is shared, not
+  per-user. Real authentication and per-user data are planned before any public
+  launch.
 
 ---
 
