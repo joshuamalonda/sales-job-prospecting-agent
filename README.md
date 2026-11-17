@@ -1,4 +1,4 @@
-# Landly
+# Landly - Sales Job Prospecting Agent
 
 A job search tool for people breaking into UK tech sales (SDR/BDR roles).
 
